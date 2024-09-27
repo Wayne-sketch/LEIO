@@ -1,0 +1,72 @@
+<launch>
+    
+    <param name="scan_line" type="int" value="64" />
+    <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
+    <param name="mapping_skip_frame" type="int" value="1" />
+    <!-- remove too closed points 0.3 5 -->
+    <param name="minimum_range" type="double" value="3.0"/>
+    <param name="mapping_line_resolution" type="double" value="0.4"/> <!-- A-LOAM -->
+    <param name="mapping_plane_resolution" type="double" value="0.8"/> <!-- A-LOAM -->
+
+    <!-- SC-A-LOAM 两米一个关键帧 2.0 10-->
+    <param name="keyframe_meter_gap" type="double" value="0.0"/> 
+    <param name="keyframe_deg_gap" type="double" value="0.0"/> 
+    <!-- CSF -->
+    <param name="useCSF" type="bool" value="false"/>
+
+    <!-- BALM -->
+    <param name="useEdge" type="bool" value="true"/>
+
+    <param name="FilterGroundLeaf" type="double" value="0.1"/>
+
+    <param name="follow" type="bool" value="true"/>
+    <param name="viewMap" type="bool" value="true"/>
+    <param name="useIsam" type="bool" value="false"/>
+
+    <!-- Scan Context -->
+    <param name="sc_dist_thres" type="double" value="0.4"/> <!-- SC-A-LOAM, if want no outliers, use 0.1-0.15 -->
+    <!-- <param name="sc_max_radius" type="double" value="20.0"/> 20 or 40 for indoor -->
+    <param name="sc_max_radius" type="double" value="80.0"/> <!-- for outdoor -->
+
+    <param name="vizMapFreq" type="double" value="0.1"/><!-- 0.1 -->
+    <param name="vizPathFreq" type="double" value="10"/>
+
+    <param name="processIsamFreq" type="double" value="0.1"/><!-- 20-->
+    <param name="loopClosureFreq" type="double" value="0.1"/><!-- 30 -->
+
+    <param name="save_directory" type="string" value="$(find faloamBA)/data/"/>  <!-- CHANGE THIS and end with / -->
+    <param name="map_save_directory" type="string" value="$(find faloamBA)/map/city.pcd"/>
+
+	<param name="root_surf_voxel_size" type="double" value="1"/>
+	<param name="root_corn_voxel_size" type="double" value="1"/>
+	<param name="accumulate_window" type="int" value="1"/>
+	<param name="surf_filter_length" type="double" value="0.2"/>
+    <param name="corn_filter_length" type="double" value="0.0"/>
+	<param name="scan2map_on" type="int" value="10"/>
+	<param name="pub_skip" type="int" value="1"/>
+
+
+    <param name="lidar_type" type="string" value="HDL64"/> 
+    <remap from="/velodyne_points" to="/velodyne_points"/>
+
+    <node pkg="faloamBA" type="front_end" name="front_end" output="screen" />
+    <node pkg="faloamBA" type="laserMapping" name="laserMapping" output="screen" />
+    <node pkg="faloamBA" type="balm_back_end" name="balm_back_end" output="screen" />
+
+    <node pkg="faloamBA" type="alaserPGO" name="alaserPGO" output="screen" />
+
+
+        <!-- utils
+    <arg name="rviz" default="true" />
+    <group if="$(arg rviz)">
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find faloamBA)/rviz_cfg/faloamBA.rviz" />
+    </group>
+    
+    -->
+
+	<arg name="rviz" default="true" />
+	<group if="$(arg rviz)">
+		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find faloamBA)/rviz_cfg/back.rviz" />
+	</group>
+
+</launch>
