@@ -47,7 +47,7 @@
 
 
     <param name="lidar_type" type="string" value="HDL64"/> 
-    <remap from="/velodyne_points" to="/points_raw"/>
+    <remap from="/velodyne_points" to="/livox/lidar"/>
 
     <node pkg="faloamBA" type="front_end" name="front_end" output="screen" />
     <node pkg="faloamBA" type="laserMapping" name="laserMapping" output="screen" />

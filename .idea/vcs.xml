@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/LOAMGBA_Public_WS/src/LOAMGBA" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/ws_livox/src" vcs="Git" />
   </component>
 </project>
