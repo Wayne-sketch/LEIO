@@ -1,2 +1,6 @@
 #ignore rosbag
 /LOAMGBA_Public_WS/rosbag/
+/LOAMGBA_Public_WS/devel/
+/LOAMGBA_Public_WS/build/
+/LOAMGBA_Public_WS/src/LOAMGBA/data/
+/LOAMGBA_Public_WS/src/LOAMGBA/map/

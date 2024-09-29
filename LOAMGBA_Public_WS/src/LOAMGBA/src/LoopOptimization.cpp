@@ -416,7 +416,7 @@ void pubPath( void )
     // pub odom and path 
     nav_msgs::Odometry odomAftPGO;
     nav_msgs::Path pathAftPGO;
-    pathAftPGO.header.frame_id = "/camera_init";
+    pathAftPGO.header.frame_id = "camera_init";
     mKF.lock(); 
     // for (int node_idx=0; node_idx < int(keyframePosesUpdated.size()) - 1; node_idx++) // -1 is just delayed visualization (because sometimes mutexed while adding(push_back) a new one)
     for (int node_idx=0; node_idx < recentIdxUpdated; node_idx++) // -1 is just delayed visualization (because sometimes mutexed while adding(push_back) a new one)
@@ -425,7 +425,7 @@ void pubPath( void )
         const Pose6D& pose_est = keyframePosesUpdated.at(node_idx); // upodated poses
         // const gtsam::Pose3& pose_est = isamCurrentEstimate.at<gtsam::Pose3>(node_idx);
         nav_msgs::Odometry odomAftPGOthis;
-        odomAftPGOthis.header.frame_id = "/camera_init";
+        odomAftPGOthis.header.frame_id = "camera_init";
         odomAftPGOthis.child_frame_id = "/aft_pgo";
         // 修正前和修正后的位姿的时间是相同的
         odomAftPGOthis.header.stamp = ros::Time().fromSec(keyframeTimes.at(node_idx));
@@ -441,7 +441,7 @@ void pubPath( void )
         poseStampAftPGO.pose = odomAftPGOthis.pose.pose;
 
         pathAftPGO.header.stamp = odomAftPGOthis.header.stamp;
-        pathAftPGO.header.frame_id = "/camera_init";
+        pathAftPGO.header.frame_id = "camera_init";
         pathAftPGO.poses.push_back(poseStampAftPGO);
     }
     mKF.unlock(); 
@@ -460,7 +460,7 @@ void pubPath( void )
         q.setY(odomAftPGO.pose.pose.orientation.y);
         q.setZ(odomAftPGO.pose.pose.orientation.z);
         transform.setRotation(q);
-        br.sendTransform(tf::StampedTransform(transform, odomAftPGO.header.stamp, "/camera_init", "/aft_pgo"));
+        br.sendTransform(tf::StampedTransform(transform, odomAftPGO.header.stamp, "camera_init", "/aft_pgo"));
 
     }
 
@@ -575,12 +575,12 @@ std::optional<gtsam::Pose3> doICPVirtualRelative( int _loop_kf_idx, int _curr_kf
     /*
     sensor_msgs::PointCloud2 cureKeyframeCloudMsg;
     pcl::toROSMsg(*cureKeyframeCloud, cureKeyframeCloudMsg);
-    cureKeyframeCloudMsg.header.frame_id = "/camera_init";
+    cureKeyframeCloudMsg.header.frame_id = "camera_init";
     pubLoopScanLocal.publish(cureKeyframeCloudMsg);// 空的
 
     sensor_msgs::PointCloud2 targetKeyframeCloudMsg;
     pcl::toROSMsg(*targetKeyframeCloud, targetKeyframeCloudMsg);
-    targetKeyframeCloudMsg.header.frame_id = "/camera_init";
+    targetKeyframeCloudMsg.header.frame_id = "camera_init";
     pubLoopSubmapLocal.publish(targetKeyframeCloudMsg);
     */
 
@@ -1015,7 +1015,7 @@ void process_viz_map(void)
             {
                 sensor_msgs::PointCloud2 laserCloudMapPGOMsg;
                 pcl::toROSMsg((*laserCloudMapPGO+*offGroundMap), laserCloudMapPGOMsg);
-                laserCloudMapPGOMsg.header.frame_id = "/camera_init";
+                laserCloudMapPGOMsg.header.frame_id = "camera_init";
                 // 发布回环修正后的降采样地图
                 pubMapAftPGO.publish(laserCloudMapPGOMsg);
             }

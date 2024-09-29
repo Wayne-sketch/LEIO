@@ -4,7 +4,7 @@
 #include <ros/ros.h>
 #include <pcl/common/transforms.h>
 #include <unordered_map>
-#include <opencv/cv.h>
+#include <opencv2/imgproc.hpp>
 #include "utility/myso3.hpp"
 #include <thread>
 #include <mutex>
@@ -191,7 +191,7 @@ void pub_func(T &pl, ros::Publisher &pub, const ros::Time &current_time)
   pl.height = 1; pl.width = pl.size();
   sensor_msgs::PointCloud2 output;
   pcl::toROSMsg(pl, output);
-  output.header.frame_id = "/camera_init";
+  output.header.frame_id = "camera_init";
   output.header.stamp = current_time;
   pub.publish(output);
 }

@@ -288,7 +288,7 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &laserOdometry)
     Eigen::Vector3d t_w_curr = q_wmap_wodom * t_wodom_curr + t_wmap_wodom;
 
     nav_msgs::Odometry odomAftMapped;
-    odomAftMapped.header.frame_id = "/camera_init";
+    odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "/aft_mapped";
     odomAftMapped.header.stamp = laserOdometry->header.stamp;
     odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
@@ -811,19 +811,19 @@ void process()
             // centerLast、laserCloudFullRes、laserCloudSurfLast、laserCloudCornerLast
             pcl::toROSMsg(*offGroundFrame, offGround_msg);
             offGround_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            offGround_msg.header.frame_id = "/camera_init";
+            offGround_msg.header.frame_id = "camera_init";
             pubOffGround.publish(offGround_msg);
 
             sensor_msgs::PointCloud2 ground_msg;
             pcl::toROSMsg(  *groundFrame, ground_msg);
             ground_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            ground_msg.header.frame_id = "/camera_init";
+            ground_msg.header.frame_id = "camera_init";
             pubGround.publish(ground_msg);
 
             sensor_msgs::PointCloud2 edge_msg;
             pcl::toROSMsg(*laserCloudCornerLast, edge_msg);
             edge_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            edge_msg.header.frame_id = "/camera_init";
+            edge_msg.header.frame_id = "camera_init";
             pubEdge.publish(edge_msg);
 
 
@@ -831,7 +831,7 @@ void process()
             //printf("whole mapping time %f ms +++++\n", t_whole.toc());
 
             nav_msgs::Odometry odomAftMapped;
-            odomAftMapped.header.frame_id = "/camera_init";
+            odomAftMapped.header.frame_id = "camera_init";
             // odomAftMapped.child_frame_id = "/aft_mapped";
             odomAftMapped.header.stamp = ros::Time().fromSec(timeLaserOdometry);
             odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
@@ -850,7 +850,7 @@ void process()
             laserAfterMappedPose.header = odomAftMapped.header;
             laserAfterMappedPose.pose = odomAftMapped.pose.pose;
             laserAfterMappedPath.header.stamp = odomAftMapped.header.stamp;
-            laserAfterMappedPath.header.frame_id = "/camera_init";
+            laserAfterMappedPath.header.frame_id = "camera_init";
             laserAfterMappedPath.poses.push_back(laserAfterMappedPose);
             pubLaserAfterMappedPath.publish(laserAfterMappedPath);
 

@@ -247,7 +247,7 @@ int main(int argc, char **argv)
     unordered_map<VOXEL_LOC, OCTO_TREE*> ground_map, corn_map, ground_map2;
     Eigen::Matrix4d trans(Eigen::Matrix4d::Identity());
     geometry_msgs::PoseArray parray;
-    parray.header.frame_id = "/camera_init";
+    parray.header.frame_id = "camera_init";
 
     while(n.ok())
     {
@@ -351,7 +351,7 @@ int main(int argc, char **argv)
 
         // ---------------------------- 当前帧位姿(优化前的)--------------------------------
         nav_msgs::Odometry laser_odom;
-        laser_odom.header.frame_id = "/camera_init";
+        laser_odom.header.frame_id = "camera_init";
         laser_odom.child_frame_id = "/aft_BA";
         laser_odom.header.stamp = ct;
         laser_odom.pose.pose.orientation.x = apose.orientation.x;
@@ -371,7 +371,7 @@ int main(int argc, char **argv)
         q.setY(apose.orientation.y);
         q.setZ(apose.orientation.z);
         transform.setRotation(q);
-        br.sendTransform(tf::StampedTransform(transform, laser_odom.header.stamp, "/camera_init", "/aft_BA"));
+        br.sendTransform(tf::StampedTransform(transform, laser_odom.header.stamp, "camera_init", "/aft_BA"));
         parray.poses.push_back(apose);
 
         // 发布优化前的位姿
@@ -511,7 +511,7 @@ int main(int argc, char **argv)
                 // cout << "opt_lsv.t_poses = " << opt_lsv.t_poses[i] << endl;
                 Eigen::Quaterniond q_w_curr(opt_lsv.so3_poses[i].matrix());
                 nav_msgs::Odometry odomAftMapped;
-                odomAftMapped.header.frame_id = "/camera_init";
+                odomAftMapped.header.frame_id = "camera_init";
                 ros::Time time = ros::Time::now();
                 odomAftMapped.header.stamp = time;
                 odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
@@ -527,21 +527,21 @@ int main(int argc, char **argv)
                 sensor_msgs::PointCloud2 ground_msg;
                 pcl::toROSMsg(  *pl_ground_buf[window_base + i], ground_msg);
                 ground_msg.header.stamp = time;
-                ground_msg.header.frame_id = "/camera_init";
+                ground_msg.header.frame_id = "camera_init";
                 pubground.publish(ground_msg);
                 pl_ground_buf[window_base + i]->clear();
 
                 sensor_msgs::PointCloud2 edge_msg;
                 pcl::toROSMsg(*pl_edge_buf[window_base + i], edge_msg);
                 edge_msg.header.stamp = time;
-                edge_msg.header.frame_id = "/camera_init";
+                edge_msg.header.frame_id = "camera_init";
                 pubEdge.publish(edge_msg);
                 pl_edge_buf[window_base + i]->clear();
 
                 sensor_msgs::PointCloud2 offground_msg;
                 pcl::toROSMsg(*pl_offground_buf[window_base + i], offground_msg);
                 offground_msg.header.stamp = time;
-                offground_msg.header.frame_id = "/camera_init";
+                offground_msg.header.frame_id = "camera_init";
                 puboffgrounds.publish(offground_msg);
                 pl_offground_buf[window_base + i]->clear();
 

@@ -22,7 +22,7 @@
 #include <ceres/ceres.h>
 #include <Eigen/Dense>
 #include <opencv2/core/eigen.hpp>
-#include <cv.hpp>
+#include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include <chrono>
 #include <image_transport/image_transport.h>
@@ -1057,28 +1057,28 @@ void PointCloudToMapping(ros::Time& timestamp_ros)
     sensor_msgs::PointCloud2 laserCloudCornerLast2;
     pcl::toROSMsg(cornerPointsLessSharp, laserCloudCornerLast2);
     laserCloudCornerLast2.header.stamp = timestamp_ros;
-    laserCloudCornerLast2.header.frame_id = "/camera_init";
+    laserCloudCornerLast2.header.frame_id = "camera_init";
     pubLaserCloudCornerLast.publish(laserCloudCornerLast2);
 
     // 原封不动发布当前平面点
     sensor_msgs::PointCloud2 laserCloudSurfLast2;
     pcl::toROSMsg(surfPointsLessFlat, laserCloudSurfLast2);
     laserCloudSurfLast2.header.stamp = timestamp_ros;
-    laserCloudSurfLast2.header.frame_id = "/camera_init";
+    laserCloudSurfLast2.header.frame_id = "camera_init";
     pubLaserCloudSurfLast.publish(laserCloudSurfLast2);
 
     // 原封不动的转发当前帧点云，后端优化是低频，高精的，需要更多的点加入，约束越多鲁棒性越好
     sensor_msgs::PointCloud2 laserCloudFullRes3;
     pcl::toROSMsg(laserCloud, laserCloudFullRes3);
     laserCloudFullRes3.header.stamp = timestamp_ros;
-    laserCloudFullRes3.header.frame_id = "/camera_init";
+    laserCloudFullRes3.header.frame_id = "camera_init";
 
     pubLaserCloudFullRes.publish(laserCloudFullRes3);
 
     // ------------------------ pub img -----------------
     sensor_msgs::ImagePtr img_msg = cv_bridge::CvImage(std_msgs::Header(),"mono8",_curr_images.back() ).toImageMsg();
     img_msg->header.stamp = timestamp_ros;
-    img_msg->header.frame_id = "/camera_init";
+    img_msg->header.frame_id = "camera_init";
     pubImage.publish(img_msg);
 
     _curr_images.clear();
@@ -1164,7 +1164,7 @@ void ICP_Registration(pcl::PointCloud<pcl::PointXYZI>& keyPoints, std::map<int, 
 
     // publish odometry
     nav_msgs::Odometry laserOdometry;
-    laserOdometry.header.frame_id = "/camera_init";
+    laserOdometry.header.frame_id = "camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = timestamp_ros;
     laserOdometry.pose.pose.orientation.x = q_w_curr.x();
@@ -1180,13 +1180,13 @@ void ICP_Registration(pcl::PointCloud<pcl::PointXYZI>& keyPoints, std::map<int, 
     laserPose.pose = laserOdometry.pose.pose;
     laserPath.header.stamp = laserOdometry.header.stamp;
     laserPath.poses.push_back(laserPose);
-    laserPath.header.frame_id = "/camera_init";
+    laserPath.header.frame_id = "camera_init";
     pubLaserPath.publish(laserPath);
 
     sensor_msgs::PointCloud2 center_msg;
     pcl::toROSMsg(keyPoints, center_msg);
     center_msg.header.stamp = timestamp_ros;
-    center_msg.header.frame_id = "/camera_init";
+    center_msg.header.frame_id = "camera_init";
     pubCenter.publish(center_msg);
     PointCloudToMapping(timestamp_ros);
 }
@@ -1496,7 +1496,7 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
 
     // publish odometry
     nav_msgs::Odometry laserOdometry;
-    laserOdometry.header.frame_id = "/camera_init";
+    laserOdometry.header.frame_id = "camera_init";
     laserOdometry.child_frame_id = "/laser_odom";
     laserOdometry.header.stamp = timestamp_ros;
     laserOdometry.pose.pose.orientation.x = q_w_curr.x();
@@ -1512,13 +1512,13 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
     laserPose.pose = laserOdometry.pose.pose;
     laserPath.header.stamp = laserOdometry.header.stamp;
     laserPath.poses.push_back(laserPose);
-    laserPath.header.frame_id = "/camera_init";
+    laserPath.header.frame_id = "camera_init";
     pubLaserPath.publish(laserPath);
 
     sensor_msgs::PointCloud2 center_msg;
     pcl::toROSMsg(keyPoints_curr, center_msg);
     center_msg.header.stamp = timestamp_ros;
-    center_msg.header.frame_id = "/camera_init";
+    center_msg.header.frame_id = "camera_init";
     pubCenter.publish(center_msg);
     PointCloudToMapping(timestamp_ros);
 }

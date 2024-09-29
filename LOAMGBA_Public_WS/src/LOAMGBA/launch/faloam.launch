@@ -47,13 +47,13 @@
 
 
     <param name="lidar_type" type="string" value="HDL64"/> 
-    <remap from="/velodyne_points" to="/velodyne_points"/>
+    <remap from="/velodyne_points" to="/points_raw"/>
 
     <node pkg="faloamBA" type="front_end" name="front_end" output="screen" />
     <node pkg="faloamBA" type="laserMapping" name="laserMapping" output="screen" />
     <node pkg="faloamBA" type="balm_back_end" name="balm_back_end" output="screen" />
 
-    <node pkg="faloamBA" type="alaserPGO" name="alaserPGO" output="screen" />
+<!--     <node pkg="faloamBA" type="alaserPGO" name="alaserPGO" output="screen" /> -->
 
 
         <!-- utils
