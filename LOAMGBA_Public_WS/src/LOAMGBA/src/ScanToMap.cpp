@@ -640,6 +640,7 @@ void process()
             // 小局部地图中的点会不断的变多
             //printf(" corner =  %d  surf = %d center = %d\n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum, centerFromMapNum);// 3852  9097
             // 第一帧点云还没加入到cube中，此时不会满足这一条件
+            std::cout << "laserCloudCornerFromMapNum: " << laserCloudCornerFromMapNum <<std::endl;
             if (laserCloudCornerFromMapNum > 10  )
             {
                 TicToc t_opt;

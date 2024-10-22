@@ -51,6 +51,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/ISAM2.h>
+#include <gtsam/geometry/Point3.h>
 
 #include "utility/common.h"
 #include "utility/tic_toc.h"
@@ -63,6 +64,7 @@
 using namespace gtsam;
 
 #include "CSF/CSF.h"
+#include "utility/utility.h"
 bool useCSF;
 bool follow;
 bool viewMap;
@@ -444,9 +446,32 @@ void pubPath( void )
         pathAftPGO.header.frame_id = "camera_init";
         pathAftPGO.poses.push_back(poseStampAftPGO);
     }
-    mKF.unlock(); 
+    mKF.unlock();
+
+    //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
+    std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/kitti_dataset/result/loamgba/result_pose_09_30_0027_07_loop.txt", std::ios::app);
+    pose1.setf(std::ios::scientific, std::ios::floatfield);
+    //kitti数据集转换tum格式的数据是18位
+    pose1.precision(9);
+    //第一个激光帧时间 static变量 只赋值一次
+    static double timeStart = odomAftPGO.header.stamp.toSec();
+    auto T1 =ros::Time().fromSec(timeStart) ;
+    // tf::Quaternion quat;
+    // tf::createQuaternionMsgFromRollPitchYaw(double r, double p, double y);//返回四元数
+    pose1<< odomAftPGO.header.stamp -T1<< " "
+        << -odomAftPGO.pose.pose.position.x << " "
+        << -odomAftPGO.pose.pose.position.z << " "
+        << -odomAftPGO.pose.pose.position.y<< " "
+        << odomAftPGO.pose.pose.orientation.x << " "
+        << odomAftPGO.pose.pose.orientation.y << " "
+        << odomAftPGO.pose.pose.orientation.z << " "
+        << odomAftPGO.pose.pose.orientation.w << std::endl;
+    pose1.close();
+
+
     pubOdomAftPGO.publish(odomAftPGO); // 最新当前帧的姿态
     pubPathAftPGO.publish(pathAftPGO); // 轨迹
+
     //cout << "pathAftPGO.poses = " << pathAftPGO.poses.size() << endl;
     globalPath = pathAftPGO;
     if(follow)
@@ -491,11 +516,15 @@ void updatePoses(void)
     recentIdxUpdated = int(keyframePosesUpdated.size()) - 1;
 
     mtxRecentPose.unlock();
+
 } // updatePoses
 
 void runISAM2opt(void)
 {
-    // called when a variable added 
+    // called when a variable added
+    //todo-3 添加gtsam边缘化 在大矩阵上边缘化掉 scancontext添加回环约束也要在大滑窗范围内
+    //todo-1 IMU加进来 构建滑窗 参考LIO-SAM
+    //todo-2 滑窗内lidar帧间先用相对位姿约束 不行的话再用点面残差约束
     isam->update(gtSAMgraph, initialEstimate);
     isam->update();
     
@@ -735,9 +764,9 @@ void process_pg()
             // Save data and Add consecutive node 
             // 
             pcl::PointCloud<PointType>::Ptr thisKeyFrame(new pcl::PointCloud<PointType>());
-            //thisKeyFrameDS = thisKeyFrame;
-            //downSizeFilterScancontext.setInputCloud(thisKeyFrame);
-            //downSizeFilterScancontext.filter(*thisKeyFrameDS);
+//            thisKeyFrameDS = thisKeyFrame;
+//            downSizeFilterScancontext.setInputCloud(thisKeyFrame);
+//            downSizeFilterScancontext.filter(*thisKeyFrameDS);
 
             mKF.lock();
             if(useCSF)
@@ -1104,7 +1133,7 @@ int main(int argc, char **argv)
     ros::Subscriber subEdge = nh.subscribe<sensor_msgs::PointCloud2>("/Edge_BA", 100, EdgeHandler);
 
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/BALM_mapped_to_init", 100, laserOdometryHandler);
-	ros::Subscriber subGPS = nh.subscribe<sensor_msgs::NavSatFix>("/gps/fix", 100, gpsHandler);
+//	ros::Subscriber subGPS = nh.subscribe<sensor_msgs::NavSatFix>("/gps/fix", 100, gpsHandler);
 
     // ------------------------------------------------------------------
 	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);

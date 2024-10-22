@@ -9,10 +9,10 @@
     <param name="mapping_plane_resolution" type="double" value="0.8"/> <!-- A-LOAM -->
 
     <!-- SC-A-LOAM 两米一个关键帧 2.0 10-->
-    <param name="keyframe_meter_gap" type="double" value="0.0"/> 
-    <param name="keyframe_deg_gap" type="double" value="0.0"/> 
+    <param name="keyframe_meter_gap" type="double" value="2.0"/>
+    <param name="keyframe_deg_gap" type="double" value="10.0"/>
     <!-- CSF -->
-    <param name="useCSF" type="bool" value="false"/>
+    <param name="useCSF" type="bool" value="true"/>
 
     <!-- BALM -->
     <param name="useEdge" type="bool" value="true"/>
@@ -31,8 +31,8 @@
     <param name="vizMapFreq" type="double" value="0.1"/><!-- 0.1 -->
     <param name="vizPathFreq" type="double" value="10"/>
 
-    <param name="processIsamFreq" type="double" value="0.1"/><!-- 20-->
-    <param name="loopClosureFreq" type="double" value="0.1"/><!-- 30 -->
+    <param name="processIsamFreq" type="double" value="10.0"/><!-- 20-->
+    <param name="loopClosureFreq" type="double" value="10.0"/><!-- 30 -->
 
     <param name="save_directory" type="string" value="$(find faloamBA)/data/"/>  <!-- CHANGE THIS and end with / -->
     <param name="map_save_directory" type="string" value="$(find faloamBA)/map/city.pcd"/>
@@ -47,13 +47,14 @@
 
 
     <param name="lidar_type" type="string" value="HDL64"/> 
-    <remap from="/velodyne_points" to="/livox/lidar"/>
+<!--     <remap from="/velodyne_points" to="/livox/lidar"/> -->
+    <remap from="/velodyne_points" to="/points_raw"/>
 
     <node pkg="faloamBA" type="front_end" name="front_end" output="screen" />
     <node pkg="faloamBA" type="laserMapping" name="laserMapping" output="screen" />
     <node pkg="faloamBA" type="balm_back_end" name="balm_back_end" output="screen" />
 
-<!--     <node pkg="faloamBA" type="alaserPGO" name="alaserPGO" output="screen" /> -->
+    <node pkg="faloamBA" type="alaserPGO" name="alaserPGO" output="screen" />
 
 
         <!-- utils

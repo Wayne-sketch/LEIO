@@ -193,7 +193,7 @@ int main(int argc, char **argv)
     ros::Publisher pub_pose = n.advertise<geometry_msgs::PoseArray>("/poseArrayTopic", 10);
     ros::Publisher pubOdomAftPGO = n.advertise<nav_msgs::Odometry>("/newest_odom", 100);
     ros::Publisher pub_cute = n.advertise<sensor_msgs::PointCloud2>("/map_cute", 100);
-    n.param<bool>("viewVoxel", viewVoxel, true);
+    n.param<bool>("viewVoxel", viewVoxel, false);
 
 
     // -------------------------- for loop --------------------
@@ -208,7 +208,7 @@ int main(int argc, char **argv)
     int window_size = 20;// sliding window size
     int margi_size = 5;// margilization size
     int filter_num = 1;// for map-refine LM optimizer
-    int thread_num = 4;// for map-refine LM optimizer
+    int thread_num = 2;// for map-refine LM optimizer
     int skip_num = 0;
     int pub_skip = 1;
 
