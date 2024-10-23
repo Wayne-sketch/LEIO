@@ -64,7 +64,7 @@
 using namespace gtsam;
 
 #include "CSF/CSF.h"
-#include "utility/utility.h"
+//#include "utility/utility.h"
 bool useCSF;
 bool follow;
 bool viewMap;
@@ -171,6 +171,10 @@ double vizMapFreq; // 0.1 means run onces every 10s
 double processIsamFreq;
 double vizPathFreq;
 double loopClosureFreq; // can change
+
+
+
+
 
 std::string padZeros(int val, int num_digits = 6) 
 {
@@ -660,6 +664,7 @@ void process_pg()
 {
     while(ros::ok())
     {
+        //todo 加入IMU预积分部分
 		while ( !odometryBuf.empty()  && !surfBuf.empty() && !edgeBuf.empty() )
         {
 			mBuf.lock();
@@ -771,7 +776,7 @@ void process_pg()
             mKF.lock();
             if(useCSF)
             {
-                // --------------------------- CFS ---------------------------
+                // --------------------------- CSF ---------------------------
                 CSF csf;
                 csf.params.iterations = 600;
                 csf.params.time_step = 0.95;
@@ -998,9 +1003,9 @@ void process_isam(void)
             cout << "running isam2 optimization ..." << endl;
             mtxPosegraph.unlock();
 
-            saveOptimizedVerticesKITTIformat(isamCurrentEstimate, pgKITTIformat); // pose
-            saveOdometryVerticesKITTIformat(odomKITTIformat); // pose
-            saveGTSAMgraphG2oFormat(isamCurrentEstimate);
+//            saveOptimizedVerticesKITTIformat(isamCurrentEstimate, pgKITTIformat); // pose
+//            saveOdometryVerticesKITTIformat(odomKITTIformat); // pose
+//            saveGTSAMgraphG2oFormat(isamCurrentEstimate);
         }
     }
 }
@@ -1075,6 +1080,298 @@ void saveMapTraj()
     cout << q1 << " " << q2 << " "  << q3 << " "  << q4 << " "  <<  x << " "  << y << " "  << z << endl;
     */
 }
+
+// IMU参数
+float imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
+float imuGyrNoise = 1.5636343949698187e-03;          // 角速度噪声标准差
+float imuAccBiasN = 6.4356659353532566e-05;          //
+float imuGyrBiasN = 3.5640318696367613e-05;
+float imuGravity = 9.80511;           // 重力加速度
+float imuRPYWeight = 0.01;
+vector<double> extRotV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
+                   2.024406e-03, 1.482454e-02, 9.998881e-01};
+vector<double> extRPYV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
+                   2.024406e-03, 1.482454e-02, 9.998881e-01};
+vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
+Eigen::Matrix3d extRot;     // xyz坐标系旋转
+Eigen::Matrix3d extRPY;     // RPY欧拉角的变换关系
+Eigen::Vector3d extTrans;   // xyz坐标系平移
+Eigen::Quaterniond extQRPY;
+extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);
+extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);
+extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);
+extQRPY = Eigen::Quaterniond(extRPY).inverse();
+
+// imu数据队列
+std::deque<sensor_msgs::Imu> imuQueOpt;
+std::deque<sensor_msgs::Imu> imuQueImu;
+
+bool systemInitialized = false;
+
+// imu预积分器
+gtsam::PreintegratedImuMeasurements *imuIntegratorOpt_;
+gtsam::PreintegratedImuMeasurements *imuIntegratorImu_;
+
+// imu因子图优化过程中的状态变量
+gtsam::Pose3 prevPose_;
+gtsam::Vector3 prevVel_;
+gtsam::NavState prevState_;
+gtsam::imuBias::ConstantBias prevBias_;
+
+// imu状态
+gtsam::NavState prevStateOdom;
+gtsam::imuBias::ConstantBias prevBiasOdom;
+
+bool doneFirstOpt = false;
+double lastImuT_imu = -1;
+double lastImuT_opt = -1;
+
+// ISAM2优化器
+//gtsam::ISAM2 optimizer;
+//gtsam::NonlinearFactorGraph graphFactors;
+//gtsam::Values graphValues;
+
+const double delta_t = 0;
+
+int key = 1;
+
+// imu-lidar位姿变换
+gtsam::Pose3 imu2Lidar = gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0), gtsam::Point3(-extTrans.x(), -extTrans.y(), -extTrans.z()));
+gtsam::Pose3 lidar2Imu = gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0), gtsam::Point3(extTrans.x(), extTrans.y(), extTrans.z()));
+
+
+/**
+ * imu原始测量数据转换到lidar系，加速度、角速度、RPY
+*/
+sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
+{
+    sensor_msgs::Imu imu_out = imu_in;
+    // 加速度，只跟xyz坐标系的旋转有关系
+    Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
+    acc = extRot * acc;
+    imu_out.linear_acceleration.x = acc.x();
+    imu_out.linear_acceleration.y = acc.y();
+    imu_out.linear_acceleration.z = acc.z();
+    // 角速度，只跟xyz坐标系的旋转有关系
+    Eigen::Vector3d gyr(imu_in.angular_velocity.x, imu_in.angular_velocity.y, imu_in.angular_velocity.z);
+    gyr = extRot * gyr;
+    imu_out.angular_velocity.x = gyr.x();
+    imu_out.angular_velocity.y = gyr.y();
+    imu_out.angular_velocity.z = gyr.z();
+    // RPY
+    Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x, imu_in.orientation.y, imu_in.orientation.z);
+    // 为什么是右乘，可以动手画一下看看
+    Eigen::Quaterniond q_final = q_from * extQRPY;
+    imu_out.orientation.x = q_final.x();
+    imu_out.orientation.y = q_final.y();
+    imu_out.orientation.z = q_final.z();
+    imu_out.orientation.w = q_final.w();
+
+    if (sqrt(q_final.x()*q_final.x() + q_final.y()*q_final.y() + q_final.z()*q_final.z() + q_final.w()*q_final.w()) < 0.1)
+    {
+        ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
+        ros::shutdown();
+    }
+
+    return imu_out;
+}
+
+/**
+ * 订阅imu原始数据
+ * 1、用上一帧激光里程计时刻对应的状态、偏置，施加从该时刻开始到当前时刻的imu预积分量，得到当前时刻的状态，也就是imu里程计
+ * 2、imu里程计位姿转到lidar系，发布里程计
+*/
+void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
+{
+    mBuf.lock();
+    // imu原始测量数据转换到lidar系，加速度、角速度、RPY
+    sensor_msgs::Imu thisImu = imuConverter(*imu_raw);
+
+    // 添加当前帧imu数据到队列
+    // //todo test 给零偏加固定偏移
+    // thisImu.angular_velocity.x += 3;
+    // thisImu.angular_velocity.y += 3;
+    // thisImu.angular_velocity.z += 3;
+
+    imuQueOpt.push_back(thisImu);
+    imuQueImu.push_back(thisImu);
+
+    // 要求上一次imu因子图优化执行成功，确保更新了上一帧（激光里程计帧）的状态、偏置，预积分重新计算了
+    // todo 确认是否需要
+    if (doneFirstOpt == false)
+        return;
+
+    double imuTime = ROS_TIME(&thisImu);
+    double dt = (lastImuT_imu < 0) ? (1.0 / 500.0) : (imuTime - lastImuT_imu);
+    lastImuT_imu = imuTime;
+
+    // imu预积分器添加一帧imu数据，注：这个预积分器的起始时刻是上一帧激光里程计时刻
+    imuIntegratorImu_->integrateMeasurement(gtsam::Vector3(thisImu.linear_acceleration.x, thisImu.linear_acceleration.y, thisImu.linear_acceleration.z),
+                                            gtsam::Vector3(thisImu.angular_velocity.x,    thisImu.angular_velocity.y,    thisImu.angular_velocity.z), dt);
+
+    // 用上一帧激光里程计时刻对应的状态、偏置，施加从该时刻开始到当前时刻的imu预计分量，得到当前时刻的状态
+    gtsam::NavState currentState = imuIntegratorImu_->predict(prevStateOdom, prevBiasOdom);
+
+    // 发布imu里程计（转到lidar系，与激光里程计同一个系）
+//    nav_msgs::Odometry odometry;
+//    odometry.header.stamp = thisImu.header.stamp;
+//    odometry.header.frame_id = odometryFrame;
+//    odometry.child_frame_id = "odom_imu";
+
+    // 变换到lidar系
+//    gtsam::Pose3 imuPose = gtsam::Pose3(currentState.quaternion(), currentState.position());
+//    gtsam::Pose3 lidarPose = imuPose.compose(imu2Lidar);
+//
+//    odometry.pose.pose.position.x = lidarPose.translation().x();
+//    odometry.pose.pose.position.y = lidarPose.translation().y();
+//    odometry.pose.pose.position.z = lidarPose.translation().z();
+//    odometry.pose.pose.orientation.x = lidarPose.rotation().toQuaternion().x();
+//    odometry.pose.pose.orientation.y = lidarPose.rotation().toQuaternion().y();
+//    odometry.pose.pose.orientation.z = lidarPose.rotation().toQuaternion().z();
+//    odometry.pose.pose.orientation.w = lidarPose.rotation().toQuaternion().w();
+//
+//    odometry.twist.twist.linear.x = currentState.velocity().x();
+//    odometry.twist.twist.linear.y = currentState.velocity().y();
+//    odometry.twist.twist.linear.z = currentState.velocity().z();
+//    odometry.twist.twist.angular.x = thisImu.angular_velocity.x + prevBiasOdom.gyroscope().x();
+//    odometry.twist.twist.angular.y = thisImu.angular_velocity.y + prevBiasOdom.gyroscope().y();
+//    odometry.twist.twist.angular.z = thisImu.angular_velocity.z + prevBiasOdom.gyroscope().z();
+//    pubImuOdometry.publish(odometry);
+    mBuf.unlock();
+}
+
+
+
+
+
+
+// 全局队列和锁
+//std::queue<nav_msgs::Odometry::ConstPtr> odometryBuf;
+//todo imu回调函数填入信息
+std::queue<sensor_msgs::Imu::ConstPtr> imuBuf;
+//todo 换成一致的锁
+std::mutex mtx;
+std::condition_variable cond_var;
+
+// 定义IMU预积分器
+gtsam::PreintegratedImuMeasurements::Params::shared_ptr imuParams;
+gtsam::imuBias::ConstantBias bias; // IMU偏差
+std::shared_ptr<PreintegratedImuMeasurements> imuIntegrator;
+
+// 滑窗相关定义
+//todo 换成全局一致的
+ISAM2 isam;
+NonlinearFactorGraph graph;
+Values initialEstimate;
+std::deque<Pose3> poseWindow;  // 存储滑窗内的位姿
+std::deque<PreintegratedImuMeasurements> imuMeasurementsWindow;  // 存储滑窗内相邻帧的IMU预积分
+
+int windowSize = 10;
+
+// 获取IMU数据并对齐到两个LiDAR帧之间
+void processIMU() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cond_var.wait(lock, [] { return !odometryBuf.empty() && !imuBuf.empty(); });
+
+        // 从队列中取出最新的两个激光帧
+        auto lidarFrame1 = odometryBuf.front();
+        odometryBuf.pop();
+        if (odometryBuf.empty()) {
+            // 等待下一个激光帧
+            continue;
+        }
+        auto lidarFrame2 = odometryBuf.front();
+
+        // IMU预积分初始化
+        imuIntegrator = std::make_shared<PreintegratedImuMeasurements>(imuParams, bias);
+
+        // 对齐两个LiDAR帧之间的IMU数据
+        while (!imuBuf.empty() && imuBuf.front()->header.stamp < lidarFrame1->header.stamp) {
+            imuBuf.pop();  // 丢弃早于第一个激光帧的IMU数据
+        }
+
+        while (!imuBuf.empty() && imuBuf.front()->header.stamp < lidarFrame2->header.stamp) {
+            sensor_msgs::Imu::ConstPtr imuData = imuBuf.front();
+            imuBuf.pop();
+
+            // 提取IMU加速度和角速度数据，进行预积分
+            Vector3 accel(imuData->linear_acceleration.x,
+                          imuData->linear_acceleration.y,
+                          imuData->linear_acceleration.z);
+            Vector3 gyro(imuData->angular_velocity.x,
+                         imuData->angular_velocity.y,
+                         imuData->angular_velocity.z);
+            double dt = 0.01;  // 假设IMU数据的时间间隔为0.01秒
+            imuIntegrator->integrateMeasurement(accel, gyro, dt);
+        }
+
+        // 保存预积分结果
+        imuMeasurementsWindow.push_back(*imuIntegrator);
+
+        // 滑窗内的位姿存储
+        Pose3 pose1 = Pose3(Rot3::Quaternion(lidarFrame1->pose.pose.orientation.w,
+                                             lidarFrame1->pose.pose.orientation.x,
+                                             lidarFrame1->pose.pose.orientation.y,
+                                             lidarFrame1->pose.pose.orientation.z),
+                            Point3(lidarFrame1->pose.pose.position.x,
+                                   lidarFrame1->pose.pose.position.y,
+                                   lidarFrame1->pose.pose.position.z));
+        poseWindow.push_back(pose1);
+
+        // 如果滑窗内的数据超过了指定大小，移除最旧的一帧
+        if (poseWindow.size() > windowSize) {
+            poseWindow.pop_front();
+            imuMeasurementsWindow.pop_front();
+        }
+
+        cond_var.notify_all();
+    }
+}
+
+// 维护滑窗并优化
+void process_pg() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cond_var.wait(lock, [] { return poseWindow.size() == windowSize; });
+
+        // 创建因子图
+        graph.resize(0);
+        initialEstimate.clear();
+
+        for (int i = 0; i < windowSize - 1; ++i) {
+            // 添加IMU因子
+            ImuFactor imuFactor(Symbol('x', i), Symbol('v', i),
+                                Symbol('x', i + 1), Symbol('v', i + 1),
+                                Symbol('b', i), imuMeasurementsWindow[i]);
+
+            graph.add(imuFactor);
+
+            // 添加位姿因子
+            initialEstimate.insert(Symbol('x', i), poseWindow[i]);
+            initialEstimate.insert(Symbol('v', i), Vector3(0, 0, 0)); // 假设初始速度为零
+            initialEstimate.insert(Symbol('b', i), bias);
+        }
+
+        // 滑窗优化
+        isam.update(graph, initialEstimate);
+        Values result = isam.calculateEstimate();
+
+        // 输出优化结果
+        for (int i = 0; i < windowSize; ++i) {
+            Pose3 optimizedPose = result.at<Pose3>(Symbol('x', i));
+            std::cout << "Optimized Pose " << i << ": " << optimizedPose << std::endl;
+        }
+
+        cond_var.notify_all();
+    }
+}
+
+
+
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "laserPGO");
@@ -1135,6 +1432,9 @@ int main(int argc, char **argv)
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/BALM_mapped_to_init", 100, laserOdometryHandler);
 //	ros::Subscriber subGPS = nh.subscribe<sensor_msgs::NavSatFix>("/gps/fix", 100, gpsHandler);
 
+    //订阅IMU数据
+    ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler, ros::TransportHints().tcpNoDelay());
+
     // ------------------------------------------------------------------
 	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
 	pubOdomRepubVerifier = nh.advertise<nav_msgs::Odometry>("/repub_odom", 100);
@@ -1148,7 +1448,7 @@ int main(int argc, char **argv)
     std::thread lc_detection {process_lcd}; // loop closure detection 
     std::thread icp_calculation {process_icp}; // 后端回环因子
     std::thread isam_update {process_isam};
-
+    std::thread imuThread(processIMU);
 
     // isam2全局优化
 	std::thread viz_map {process_viz_map}; // visualization - map (low frequency because it is heavy)
@@ -1159,7 +1459,12 @@ int main(int argc, char **argv)
  	ros::spin();
     viz_map.join();
     sleep(10);
-    //viz_path.join();
+    viz_path.join();
+    posegraph_slam.join();
+    lc_detection.join();
+    icp_calculation.join();
+    isam_update.join();
+    imuThread.join();
 
 	return 0;
 }
