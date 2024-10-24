@@ -1183,6 +1183,7 @@ sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
  * 1、用上一帧激光里程计时刻对应的状态、偏置，施加从该时刻开始到当前时刻的imu预积分量，得到当前时刻的状态，也就是imu里程计
  * 2、imu里程计位姿转到lidar系，发布里程计
 */
+//向imuBuf中填入IMU信息
 void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
 {
     mBuf.lock();
@@ -1195,24 +1196,25 @@ void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
     // thisImu.angular_velocity.y += 3;
     // thisImu.angular_velocity.z += 3;
 
-    imuQueOpt.push_back(thisImu);
-    imuQueImu.push_back(thisImu);
+    imuBuf.push_back(thisImu);
+//    imuQueOpt.push_back(thisImu);
+//    imuQueImu.push_back(thisImu);
 
     // 要求上一次imu因子图优化执行成功，确保更新了上一帧（激光里程计帧）的状态、偏置，预积分重新计算了
     // todo 确认是否需要
-    if (doneFirstOpt == false)
-        return;
-
-    double imuTime = ROS_TIME(&thisImu);
-    double dt = (lastImuT_imu < 0) ? (1.0 / 500.0) : (imuTime - lastImuT_imu);
-    lastImuT_imu = imuTime;
-
-    // imu预积分器添加一帧imu数据，注：这个预积分器的起始时刻是上一帧激光里程计时刻
-    imuIntegratorImu_->integrateMeasurement(gtsam::Vector3(thisImu.linear_acceleration.x, thisImu.linear_acceleration.y, thisImu.linear_acceleration.z),
-                                            gtsam::Vector3(thisImu.angular_velocity.x,    thisImu.angular_velocity.y,    thisImu.angular_velocity.z), dt);
-
-    // 用上一帧激光里程计时刻对应的状态、偏置，施加从该时刻开始到当前时刻的imu预计分量，得到当前时刻的状态
-    gtsam::NavState currentState = imuIntegratorImu_->predict(prevStateOdom, prevBiasOdom);
+//    if (doneFirstOpt == false)
+//        return;
+//
+//    double imuTime = ROS_TIME(&thisImu);
+//    double dt = (lastImuT_imu < 0) ? (1.0 / 500.0) : (imuTime - lastImuT_imu);
+//    lastImuT_imu = imuTime;
+//
+//    // imu预积分器添加一帧imu数据，注：这个预积分器的起始时刻是上一帧激光里程计时刻
+//    imuIntegratorImu_->integrateMeasurement(gtsam::Vector3(thisImu.linear_acceleration.x, thisImu.linear_acceleration.y, thisImu.linear_acceleration.z),
+//                                            gtsam::Vector3(thisImu.angular_velocity.x,    thisImu.angular_velocity.y,    thisImu.angular_velocity.z), dt);
+//
+//    // 用上一帧激光里程计时刻对应的状态、偏置，施加从该时刻开始到当前时刻的imu预计分量，得到当前时刻的状态
+//    gtsam::NavState currentState = imuIntegratorImu_->predict(prevStateOdom, prevBiasOdom);
 
     // 发布imu里程计（转到lidar系，与激光里程计同一个系）
 //    nav_msgs::Odometry odometry;
@@ -1258,22 +1260,24 @@ std::condition_variable cond_var;
 // 定义IMU预积分器
 gtsam::PreintegratedImuMeasurements::Params::shared_ptr imuParams;
 gtsam::imuBias::ConstantBias bias; // IMU偏差
-std::shared_ptr<PreintegratedImuMeasurements> imuIntegrator;
+std::shared_ptr<gtsam::PreintegratedImuMeasurements> imuIntegrator;
 
 // 滑窗相关定义
 //todo 换成全局一致的
-ISAM2 isam;
-NonlinearFactorGraph graph;
-Values initialEstimate;
-std::deque<Pose3> poseWindow;  // 存储滑窗内的位姿
-std::deque<PreintegratedImuMeasurements> imuMeasurementsWindow;  // 存储滑窗内相邻帧的IMU预积分
+gtsam::ISAM2 isam;
+gtsam::NonlinearFactorGraph graph;
+gtsam::Values initialEstimate;
+//todo 用自己的pose6d数据结构，安排好
+std::deque<gtsam::Pose3> poseWindow;  // 存储滑窗内的位姿
+std::deque<gtsam::PreintegratedImuMeasurements> imuMeasurementsWindow;  // 存储滑窗内相邻帧的IMU预积分
 
 int windowSize = 10;
 
 // 获取IMU数据并对齐到两个LiDAR帧之间
 void processIMU() {
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx);
+    while (ros::ok()) {
+        std::unique_lock<std::mutex> lock(mBuf);
+        //todo 这里目前只考虑lidar里程计和imu信息，最后在把回环加入进来时再考虑点云信息
         cond_var.wait(lock, [] { return !odometryBuf.empty() && !imuBuf.empty(); });
 
         // 从队列中取出最新的两个激光帧
@@ -1293,17 +1297,19 @@ void processIMU() {
             imuBuf.pop();  // 丢弃早于第一个激光帧的IMU数据
         }
 
+        //todo 这里需要处理首尾部分的IMU数据，和lidar对齐，参考LIO-SAM
         while (!imuBuf.empty() && imuBuf.front()->header.stamp < lidarFrame2->header.stamp) {
             sensor_msgs::Imu::ConstPtr imuData = imuBuf.front();
             imuBuf.pop();
 
             // 提取IMU加速度和角速度数据，进行预积分
-            Vector3 accel(imuData->linear_acceleration.x,
+            gtsam::Vector3 accel(imuData->linear_acceleration.x,
                           imuData->linear_acceleration.y,
                           imuData->linear_acceleration.z);
-            Vector3 gyro(imuData->angular_velocity.x,
+            gtsam::Vector3 gyro(imuData->angular_velocity.x,
                          imuData->angular_velocity.y,
                          imuData->angular_velocity.z);
+            //todo 这里lio-sam怎么给的
             double dt = 0.01;  // 假设IMU数据的时间间隔为0.01秒
             imuIntegrator->integrateMeasurement(accel, gyro, dt);
         }
@@ -1312,7 +1318,7 @@ void processIMU() {
         imuMeasurementsWindow.push_back(*imuIntegrator);
 
         // 滑窗内的位姿存储
-        Pose3 pose1 = Pose3(Rot3::Quaternion(lidarFrame1->pose.pose.orientation.w,
+        gtsam::Pose3 pose1 = gtsam::Pose3(gtsam::Rot3::Quaternion(lidarFrame1->pose.pose.orientation.w,
                                              lidarFrame1->pose.pose.orientation.x,
                                              lidarFrame1->pose.pose.orientation.y,
                                              lidarFrame1->pose.pose.orientation.z),
@@ -1331,23 +1337,28 @@ void processIMU() {
     }
 }
 
+//todo 先实现基本的LIO，然后把LOAMGBA内容融合进来
 // 维护滑窗并优化
 void process_pg() {
-    while (true) {
-        std::unique_lock<std::mutex> lock(mtx);
+    while (ros::ok()) {
+        std::unique_lock<std::mutex> lock(mBuf);
         cond_var.wait(lock, [] { return poseWindow.size() == windowSize; });
 
         // 创建因子图
-        graph.resize(0);
+        gtSAMgraph.resize(0);
         initialEstimate.clear();
 
-        for (int i = 0; i < windowSize - 1; ++i) {
+        //todo 这里确认一下gtsam维护因子图的索引机制 参考LIO-SAM 每100帧重启一次gtsam优化器，前面的信息可以像LIO-SAM一样作为新的先验，也可以边缘化一下，边缘化是最正确合理的方式 gtsam或者自动边缘化，或者计算边缘化协方差后手动删除因子
+        //todo 这里的索引需要倒推，确认滑窗大小的一致性，算上最新帧有11帧，windowSize=10
+        for (int i = key; i > key - windowSize; ++i) {
             // 添加IMU因子
-            ImuFactor imuFactor(Symbol('x', i), Symbol('v', i),
-                                Symbol('x', i + 1), Symbol('v', i + 1),
-                                Symbol('b', i), imuMeasurementsWindow[i]);
+            gtsam::ImuFactor imuFactor(Symbol('x', i - 1), Symbol('v', i - 1),
+                                Symbol('x', i), Symbol('v', i),
+                                Symbol('b', i - 1), imuMeasurementsWindow[i]);
 
             graph.add(imuFactor);
+
+            //todo LIO-SAM中还单独添加了一次IMU零偏的因子 这里是否要加入
 
             // 添加位姿因子
             initialEstimate.insert(Symbol('x', i), poseWindow[i]);
@@ -1358,6 +1369,8 @@ void process_pg() {
         // 滑窗优化
         isam.update(graph, initialEstimate);
         Values result = isam.calculateEstimate();
+
+        //todo 优化以后还要IMU预积分还要根据零偏更新
 
         // 输出优化结果
         for (int i = 0; i < windowSize; ++i) {
@@ -1444,13 +1457,19 @@ int main(int argc, char **argv)
 	pubLoopScanLocal = nh.advertise<sensor_msgs::PointCloud2>("/loop_scan_local", 100);
 	pubLoopSubmapLocal = nh.advertise<sensor_msgs::PointCloud2>("/loop_submap_local", 100);
 
+    //threads说明：回调函数向队列中填入信息
+    //todo 维护滑窗优化的因子 和真正执行优化的关系还需要考虑一下
 	std::thread posegraph_slam {process_pg}; // 后端里程计因子
+    //todo 原本执行回环检测，构建完其他部分后再考虑怎么融合进去
     std::thread lc_detection {process_lcd}; // loop closure detection 
     std::thread icp_calculation {process_icp}; // 后端回环因子
+    //todo 原本为真正执行后端优化的部分，考虑和维护滑窗的线程的关系后决定是否要删除
     std::thread isam_update {process_isam};
+    //对齐imu和lidar，做imu预积分
     std::thread imuThread(processIMU);
 
     // isam2全局优化
+    //todo 暂时不要了
 	std::thread viz_map {process_viz_map}; // visualization - map (low frequency because it is heavy)
 	std::thread viz_path {process_viz_path}; // visualization - path (high frequency)
 
