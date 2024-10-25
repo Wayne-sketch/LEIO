@@ -95,7 +95,9 @@ std::queue<sensor_msgs::PointCloud2ConstPtr> edgeBuf;
 std::queue<sensor_msgs::NavSatFix::ConstPtr> gpsBuf;
 std::queue<std::pair<int, int> > scLoopICPBuf;
 
+//消息队列锁
 std::mutex mBuf;
+
 std::mutex mKF;
 
 double timeLaserOdometry = 0.0;
@@ -130,6 +132,7 @@ double scDistThres, scMaximumRadius;
 
 pcl::VoxelGridLargeScale<PointType> downSizeFilterICP;
 std::mutex mtxICP;
+//isam相关操作锁
 std::mutex mtxPosegraph;
 std::mutex mtxRecentPose;
 
@@ -995,6 +998,7 @@ void process_isam(void)
     while (ros::ok())
     {
         rate.sleep();
+        //保证至少有先验信息
         if( gtSAMgraphMade )
         {
             mtxPosegraph.lock();
@@ -1350,7 +1354,7 @@ void process_pg() {
 
         //todo 这里确认一下gtsam维护因子图的索引机制 参考LIO-SAM 每100帧重启一次gtsam优化器，前面的信息可以像LIO-SAM一样作为新的先验，也可以边缘化一下，边缘化是最正确合理的方式 gtsam或者自动边缘化，或者计算边缘化协方差后手动删除因子
         //todo 这里的索引需要倒推，确认滑窗大小的一致性，算上最新帧有11帧，windowSize=10
-        for (int i = key; i > key - windowSize; ++i) {
+        for (int i = key; i > key - windowSize; i--) {
             // 添加IMU因子
             gtsam::ImuFactor imuFactor(Symbol('x', i - 1), Symbol('v', i - 1),
                                 Symbol('x', i), Symbol('v', i),
@@ -1362,19 +1366,23 @@ void process_pg() {
 
             // 添加位姿因子
             initialEstimate.insert(Symbol('x', i), poseWindow[i]);
+            //todo 赋初始值 参考LIO-SAM怎么赋值的
             initialEstimate.insert(Symbol('v', i), Vector3(0, 0, 0)); // 假设初始速度为零
+            //todo 参考LIO-SAM
             initialEstimate.insert(Symbol('b', i), bias);
         }
 
         // 滑窗优化
         isam.update(graph, initialEstimate);
+        isam.update();
         Values result = isam.calculateEstimate();
 
         //todo 优化以后还要IMU预积分还要根据零偏更新
 
         // 输出优化结果
-        for (int i = 0; i < windowSize; ++i) {
+        for (int i = key; i > key - windowSize; i--) {
             Pose3 optimizedPose = result.at<Pose3>(Symbol('x', i));
+            //todo 要把优化结果提取出来，放入全局变量中 参考LIO-SAM
             std::cout << "Optimized Pose " << i << ": " << optimizedPose << std::endl;
         }
 
