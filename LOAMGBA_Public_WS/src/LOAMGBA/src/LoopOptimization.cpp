@@ -110,12 +110,12 @@ double timeEdge= 0.0;
 // std::vector< std::pair< pcl::PointCloud<PointType>::Ptr, pcl::PointCloud<PointType>::Ptr> > keyframeLaserClouds_;
 std::vector< std::tuple<pcl::PointCloud<PointType>::Ptr, pcl::PointCloud<PointType>::Ptr, pcl::PointCloud<PointType>::Ptr> > keyframeLaserClouds_;
 
-//todo 可能要把速度和零偏也加入进来 便于管理 改成deque
+//todo 确定使用这个数据结构 把速度和零偏也加入进来 便于管理 改成deque
 std::vector<Pose6D> keyframePoses;
 std::vector<Pose6D> keyframePosesUpdated;
 std::vector<double> keyframeTimes;
 int recentIdxUpdated = 0;
-
+s
 gtsam::NonlinearFactorGraph gtSAMgraph;
 bool gtSAMgraphMade = false;
 gtsam::Values initialEstimate;
@@ -1380,7 +1380,7 @@ void process_pg() {
 
         cond_var.wait(lock, [] { return poseWindow.size() == windowSize; });
 
-        //todo 获取当前激光帧位姿
+        //获取当前激光帧位姿
         float p_x;
         float p_y;
         float p_z;
@@ -1421,7 +1421,7 @@ void process_pg() {
 
           //把滑窗内剩余帧也加入到因子图中
           for (int i = 1; i < windowSize; i++) {
-            //todo 添加相对位姿
+            //添加相对位姿
             p_x = poseWindow[i - 1].pose.pose.position.x;
             p_y = poseWindow[i - 1].pose.pose.position.y;
             p_z = poseWindow[i - 1].pose.pose.position.z;
