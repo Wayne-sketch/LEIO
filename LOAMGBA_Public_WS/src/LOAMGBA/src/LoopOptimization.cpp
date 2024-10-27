@@ -1130,6 +1130,7 @@ gtsam::PreintegratedImuMeasurements *imuIntegratorOpt_;
 gtsam::PreintegratedImuMeasurements *imuIntegratorImu_;
 
 // imu因子图优化过程中的状态变量
+//todo 在添加IMU预积分因子的时候作为临时存储变量
 gtsam::Pose3 prevPose_;
 gtsam::Vector3 prevVel_;
 gtsam::NavState prevState_;
@@ -1287,10 +1288,10 @@ std::vector<std::shared_ptr<gtsam::PreintegratedImuMeasurements>> imuIntegrators
 gtsam::ISAM2 isam;
 gtsam::NonlinearFactorGraph graph;
 gtsam::Values initialEstimate;
-//todo 用自己的pose6d数据结构，安排好
-std::deque<gtsam::Pose3> poseWindow;  // 存储滑窗内的位姿
+//todo 用自定义的数据结构
+std::vector<Frame> frameWindow;  // 存储滑窗内的位姿 速度 零偏
 // windowSize - 1 个IMU预积分器，[0, windowSize - 2]，储滑窗内相邻帧的IMU预积分 imuMeasurementsWindow[i]存储的是poseWindow[i]到poseWindow[i + 1]的预积分
-std::deque<gtsam::PreintegratedImuMeasurements> imuMeasurementsWindow;
+std::vector<gtsam::PreintegratedImuMeasurements> imuMeasurementsWindow;
 bool systemInitialized = false;
 int windowSize = 10;
 
@@ -1378,7 +1379,7 @@ void process_pg() {
     while (ros::ok()) {
         std::unique_lock<std::mutex> lock(mBuf);
 
-        cond_var.wait(lock, [] { return poseWindow.size() == windowSize; });
+        cond_var.wait(lock, [] { return frameWindow.size() == windowSize; });
 
         //获取当前激光帧位姿
         float p_x;
@@ -1397,13 +1398,13 @@ void process_pg() {
 
           //初始化第一帧作为先验，后续每帧不再是先验
           //添加里程计位姿先验因子 把第一帧的lidar位姿作为固定先验 以lidar位姿为核心
-          p_x = poseWindow[0].pose.pose.position.x;
-          p_y = poseWindow[0].pose.pose.position.y;
-          p_z = poseWindow[0].pose.pose.position.z;
-          r_x = poseWindow[0].pose.pose.orientation.x;
-          r_y = poseWindow[0].pose.pose.orientation.y;
-          r_z = poseWindow[0].pose.pose.orientation.z;
-          r_w = poseWindow[0].pose.pose.orientation.w;
+          p_x = frameWindow[0].pose.pose.pose.position.x;
+          p_y = frameWindow[0].pose.pose.pose.position.y;
+          p_z = frameWindow[0].pose.pose.pose.position.z;
+          r_x = frameWindow[0].pose.pose.pose.orientation.x;
+          r_y = frameWindow[0].pose.pose.pose.orientation.y;
+          r_z = frameWindow[0].pose.pose.pose.orientation.z;
+          r_w = frameWindow[0].pose.pose.pose.orientation.w;
 
           gtsam::Pose3 lidarPose0 = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
           gtsam::ProirFactor<gtsam::Pose3> priorPose(gtsam::Symbol('x', 0), lidarPose0, priorPoseNoise);
@@ -1422,47 +1423,47 @@ void process_pg() {
           //把滑窗内剩余帧也加入到因子图中
           for (int i = 1; i < windowSize; i++) {
             //添加相对位姿
-            p_x = poseWindow[i - 1].pose.pose.position.x;
-            p_y = poseWindow[i - 1].pose.pose.position.y;
-            p_z = poseWindow[i - 1].pose.pose.position.z;
-            r_x = poseWindow[i - 1].pose.pose.orientation.x;
-            r_y = poseWindow[i - 1].pose.pose.orientation.y;
-            r_z = poseWindow[i - 1].pose.pose.orientation.z;
-            r_w = poseWindow[i - 1].pose.pose.orientation.w;
+            p_x = frameWindow[i - 1].pose.pose.pose.position.x;
+            p_y = frameWindow[i - 1].pose.pose.pose.position.y;
+            p_z = frameWindow[i - 1].pose.pose.pose.position.z;
+            r_x = frameWindow[i - 1].pose.pose.pose.orientation.x;
+            r_y = frameWindow[i - 1].pose.pose.pose.orientation.y;
+            r_z = frameWindow[i - 1].pose.pose.pose.orientation.z;
+            r_w = frameWindow[i - 1].pose.pose.pose.orientation.w;
             gtsam::Pose3 lidarPose_prev = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
 
-            p_x = poseWindow[i].pose.pose.position.x;
-            p_y = poseWindow[i].pose.pose.position.y;
-            p_z = poseWindow[i].pose.pose.position.z;
-            r_x = poseWindow[i].pose.pose.orientation.x;
-            r_y = poseWindow[i].pose.pose.orientation.y;
-            r_z = poseWindow[i].pose.pose.orientation.z;
-            r_w = poseWindow[i].pose.pose.orientation.w;
+            p_x = frameWindow[i].pose.pose.pose.position.x;
+            p_y = frameWindow[i].pose.pose.pose.position.y;
+            p_z = frameWindow[i].pose.pose.pose.position.z;
+            r_x = frameWindow[i].pose.pose.pose.orientation.x;
+            r_y = frameWindow[i].pose.pose.pose.orientation.y;
+            r_z = frameWindow[i].pose.pose.pose.orientation.z;
+            r_w = frameWindow[i].pose.pose.pose.orientation.w;
             gtsam::Pose3 lidarPose_curr = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
-            //todo keyframePoses改成deque只维护windowSize个，[0, windowSize - 1]，然后需要添加一个slideWindow函数，isam中需要的因子图里的索引值，只记录最新帧的，添加的时候倒推
-//            gtsam::Pose3 poseFrom = Pose6DtoGTSAMPose3(keyframePoses.at(i - 1));
-//            gtsam::Pose3 poseTo = Pose6DtoGTSAMPose3(keyframePoses.at(i));
-
-            // odom factor
-            // T_curr2last
-//            gtsam::Pose3 relPose = poseFrom.between(poseTo);
+            //todo keyframePoses只维护windowSize个，[0, windowSize - 1]，然后需要添加一个slideWindow函数，isam中需要的因子图里的索引值，只记录最新帧的，添加的时候倒推
             gtsam::Pose3 relPose = lidarPose_prev.between(lidarPose_curr);
             // 添加后端里程计因子，当前帧和上一帧的帧间约束
             gtSAMgraph.add(gtsam::BetweenFactor<gtsam::Pose3>(gtsam::Symbol('x', i - 1), gtsam::Symbol('x', i), relPose, odomNoise));
             graphValues.insert(gtsam::Symbol('x', i), lidarPose_curr);
 
-            //todo 添加IMU预积分因子
+            //添加IMU预积分因子
             //上一帧位姿，上一帧速度，下一帧位姿，下一帧速度，上一帧帧偏置，预积分量
             gtsam::ImuFactor imu_factor(gtsam::Symbol('x', i - 1), gtsam::Symbol('v', i - 1), gtsam::Symbol('x', i), gtsam::Symbol('v', i), gtsam::Symbol('b', i - 1), imuMeasurementsWindow[i - 1]);
             graphFactors.add(imu_factor);
-            //todo 添加imu偏置因子，上一帧偏置，下一帧偏置，观测值(应该给多少)，噪声协方差；deltaTij()是积分段的时间
+            //todo 添加imu偏置因子，上一帧偏置，下一帧偏置，观测值为0（零偏尽量不动），噪声协方差（和IMU预积分器的积分时间相关）；deltaTij()是积分段的时间
             graphFactors.add(gtsam::BetweenFactor<gtsam::imuBias::ConstantBias>(gtsam::Symbol('b', i - 1), gtsam::Symbol('b', i), gtsam::imuBias::ConstantBias(),
                          gtsam::noiseModel::Diagonal::Sigmas(sqrt(imuIntegratorOpt_->deltaTij()) * noiseModelBetweenBias)));
-            //LIO-SAM的做法：用前一帧的状态、偏置，施加imu预计分量，得到当前帧的状态
-//            gtsam::NavState propState_ = imuIntegratorOpt_->predict(prevState_, prevBias_);
+            //用前一帧的状态、偏置，施加imu预计分量，得到当前帧的状态
+            // 提取前一帧位姿、速度
+            prevPose_  = frameWindow[i - 1].pose;
+            prevVel_   = frameWindow[i - 1].velocity;
+            // 获取前一帧imu偏置
+            prevBias_ = frameWindow[i - 1].bias;
+            // 获取前一帧状态
+            prevState_ = gtsam::NavState(prevPose_, prevVel_);
+            gtsam::NavState propState_ = imuMeasurementsWindow[i - 1].predict(prevState_, prevBias_);
             // 变量节点赋初值
             graphValues.insert(gtsam::Symbol('x', i), lidarPose_curr);
-            //todo 从滑窗内取出速度和零偏
             graphValues.insert(gtsam::Symbol('v', i), propState_.v());
             graphValues.insert(gtsam::Symbol('b', i), prevBias_);
             // 优化
@@ -1476,7 +1477,7 @@ void process_pg() {
           // 优化一次
           optimizer.update(graphFactors, graphValues);
           graphFactors.resize(0);
-          graphValues.clear();
+          graphValues.clear()
 
           //todo 重置优化之后的偏置
           imuIntegratorImu_->resetIntegrationAndSetBias(prevBias_);
@@ -1488,7 +1489,7 @@ void process_pg() {
           return;
         }//end if
         else {
-            //先不考虑100帧重置isam积分器
+            //先不考虑100帧重置isam优化器
             // 创建因子图
             gtSAMgraph.resize(0);
             initialEstimate.clear();
@@ -1560,6 +1561,7 @@ void process_pg() {
             graphValues.clear();
         }//else end
 
+        //todo 优化后要把优化结果提取出来 并让滑窗向下滑动
         // 滑窗优化
         isam.update(gtSAMgraph, initialEstimate);
         isam.update();

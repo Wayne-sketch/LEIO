@@ -1,3 +1,11 @@
+/*
+ * @Author: ctx cuitongxin201024@163.com
+ * @Date: 2024-10-25 09:02:28
+ * @LastEditors: ctx cuitongxin201024@163.com
+ * @LastEditTime: 2024-10-27 13:37:53
+ * @FilePath: \LEIO\LOAMGBA_Public_WS\src\LOAMGBA\include\utility\common.h
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 // This is an advanced implementation of the algorithm described in the following paper:
 //   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
 //     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014. 
@@ -39,6 +47,10 @@
 #include <cmath>
 
 #include <pcl/point_types.h>
+#include <gtsam/geometry/Rot3.h>
+#include <gtsam/geometry/Pose3.h>
+#include <gtsam/geometry/Rot2.h>
+#include <gtsam/geometry/Pose2.h>
 
 typedef pcl::PointXYZI PointType;
 
@@ -60,3 +72,13 @@ struct Pose6D {
   double pitch;
   double yaw;
 };
+
+class Frame {
+public:
+  //位姿
+  gtsam::Pose3 pose;
+  //速度
+  gtsam::Vector3 velocity;
+  //零偏
+  gtsam::imuBias::ConstantBias bias;
+}
