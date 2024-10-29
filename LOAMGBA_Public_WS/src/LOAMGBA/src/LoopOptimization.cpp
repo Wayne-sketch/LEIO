@@ -1344,9 +1344,17 @@ void imuRepropagate(gtsam::PreintegratedImuMeasurements &imuMeasurement, int i) 
 }
 
 void slideWindow() {
-
-
-
+    for (int i = 0; i < windowSize - 1; i++) {
+        frameWindow[i] = frameWindow[i + 1];
+    }
+    for (int i = 0; i < windowSize - 2; i++) {
+        imuMeasurementsWindow[i] = imuMeasurementsWindow[i + 1];
+        imuBufAligned[i] = imuBufAligned[i + 1];
+    }
+    //把最后的都扔掉
+    frameWindow.pop_back();
+    imuMeasurementsWindow.pop_back();
+    imuBufAligned.pop_back();
     return;
 }
 
