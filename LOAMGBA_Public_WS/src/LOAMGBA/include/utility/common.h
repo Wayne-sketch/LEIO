@@ -51,6 +51,7 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot2.h>
 #include <gtsam/geometry/Pose2.h>
+#include <gtsam/navigation/ImuBias.h>
 
 typedef pcl::PointXYZI PointType;
 
@@ -81,4 +82,10 @@ public:
   gtsam::Vector3 velocity;
   //零偏
   gtsam::imuBias::ConstantBias bias;
+};
+
+template<typename T>
+double ROS_TIME(T msg)
+{
+  return msg->header.stamp.toSec();
 }
