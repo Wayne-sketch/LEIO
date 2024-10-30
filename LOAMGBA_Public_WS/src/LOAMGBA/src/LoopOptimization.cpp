@@ -1465,7 +1465,8 @@ void process_lio() {
             graphValues.insert(gtsam::Symbol('b', i), prevBias_);
             //todo 及时更新每帧的速度和零偏 位姿还没有更新
             frameWindow[i].velocity = propState_.v();
-            frameWindow[i].bias = propState_.b();
+            //零偏不用更新，第一次滑窗优化初始值都是0
+//            frameWindow[i].bias = propState_.b();
           }
           systemInitialized = true;
         }//end if
