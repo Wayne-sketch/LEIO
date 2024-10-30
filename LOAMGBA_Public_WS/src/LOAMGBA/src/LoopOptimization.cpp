@@ -111,7 +111,9 @@ double timeEdge= 0.0;
 std::vector< std::tuple<pcl::PointCloud<PointType>::Ptr, pcl::PointCloud<PointType>::Ptr, pcl::PointCloud<PointType>::Ptr> > keyframeLaserClouds_;
 
 //LIO用自定义的数据结构
+double frameTime = 0;
 std::vector<Frame> frameWindow;  // 存储滑窗内的位姿 速度 零偏
+std::vector<double> frameTimes;
 // windowSize - 1 个IMU预积分器，[0, windowSize - 2]，储滑窗内相邻帧的IMU预积分 imuMeasurementsWindow[i]存储的是poseWindow[i]到poseWindow[i + 1]的预积分
 std::vector<std::shared_ptr<gtsam::PreintegratedImuMeasurements>> imuMeasurementsWindow;
 bool systemInitialized = false;
@@ -366,9 +368,168 @@ void saveOptimizedVerticesKITTIformat(gtsam::Values _estimates, std::string _fil
 // 后端位姿
 void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 {
-	mBuf.lock();
-	odometryBuf.push(_laserOdometry);
-	mBuf.unlock();
+//  {
+//    std::lock_guard<std::mutex> lock(mBuf);
+      std::unique_lock<std::mutex> lock(mBuf);
+
+    odometryBuf.push(_laserOdometry);
+//    std::cout << "_laserOdometry -> header.stamp.toSec()" << _laserOdometry -> header.stamp.toSec() << std::endl;
+//    std::cout << "odometryBuf.size(): " << odometryBuf.size() << std::endl;
+//  }
+//    cond_var.notify_all();  // 唤醒等待的线程
+
+//    while (ros::ok()) {
+        std::vector<sensor_msgs::Imu> imuDataBetweenFrames;
+        //只进来一次
+//        std::cout << "获取mBuf前mark" << std::endl;
+//        std::unique_lock<std::mutex> lock(mBuf);
+        //这里目前只考虑lidar里程计和imu信息，最后在把回环加入进来时再考虑点云信息
+        //todo 这里能到
+//        std::cout << "laserhandler odometryBuf.size(): " << odometryBuf.size() << std::endl;
+        cond_var.wait(lock, [] { return !odometryBuf.empty() && !imuBuf.empty(); });
+        // 对齐两个LiDAR帧之间的IMU数据 把imuBuf分到imuBufAligned
+        auto currOdom = odometryBuf.front();
+        odometryBuf.pop();
+        frameTime = currOdom -> header.stamp.toSec();
+        //第一帧处理
+        if (lastOdom == nullptr) {
+            //等待下一个激光帧
+            lastOdom = currOdom;
+            //把当前帧存下来
+            Frame firstFrame;
+        	// 滑窗内的位姿存储
+        	gtsam::Pose3 lidarPose = gtsam::Pose3(gtsam::Rot3::Quaternion(currOdom->pose.pose.orientation.w,
+            	                                 currOdom->pose.pose.orientation.x,
+                	                             currOdom->pose.pose.orientation.y,
+                    	                         currOdom->pose.pose.orientation.z),
+                        	    Point3(currOdom->pose.pose.position.x,
+                            	       currOdom->pose.pose.position.y,
+                                	   currOdom->pose.pose.position.z));
+        	firstFrame.pose = lidarPose;
+        	//第一帧速度和零偏都给0 后续的利用IMU预积分器推导
+        	firstFrame.velocity = gtsam::Vector3(0, 0, 0);
+        	firstFrame.bias = gtsam::imuBias::ConstantBias();
+        	frameWindow.push_back(firstFrame);
+            frameTimes.push_back(frameTime);
+        	// 如果滑窗内的数据超过了指定大小，移除最旧的一帧
+        	if (frameWindow.size() > windowSize + 1) {
+            	frameWindow.erase(frameWindow.begin());
+        	}
+            if (frameTimes.size() > windowSize + 1) {
+            	frameTimes.erase(frameTimes.begin());
+        	}
+        	//维护imu预积分器和imuBufAligned的大小
+        	if (imuMeasurementsWindow.size() > windowSize) {
+          		imuMeasurementsWindow.erase(imuMeasurementsWindow.begin());
+        	}
+        	if (imuBufAligned.size() > windowSize) {
+          		imuBufAligned.erase(imuBufAligned.begin());
+        	}
+            //这里不用key++，key=0指向第一帧
+//            continue;
+              std::cout << "frame放进来了" <<std::endl;
+              cond_var.notify_all();
+              return ;
+        }
+        //非第一帧
+        //IMU预积分
+        //todo 这里时间获取有问题 应该没问题
+        double startTime = lastOdom->header.stamp.toSec();
+        double endTime = currOdom->header.stamp.toSec();
+        //todo 这里需要处理首尾部分的IMU数据，和lidar对齐，参考LIO-SAM
+        //todo 这里能走到
+        std::cout << "imuBuf.size(): " << imuBuf.size() << std::endl;
+        while (!imuBuf.empty()) {
+            auto imuData = imuBuf.front();
+            double imuTime = imuData.header.stamp.toSec();
+            //这里进来了
+//            std::cout << "进来了" << std::endl;
+            std::cout << std::fixed << std::setprecision(10);  // 设置精度为 10 位小数
+            std::cout << "imuTime: " << imuTime << std::endl;
+            std:;cout << "startTime: " << startTime << endl;
+              std::cout << "endTime: " << endTime << endl;
+              //todo 这里时间差得太多了
+            if (imuTime >= startTime && imuTime <= endTime) {
+              	//todo 这里没进来过
+              	std::cout << "放入imu信息"	<< std::endl;
+                imuDataBetweenFrames.push_back(imuData);
+                std::cout << "inside imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
+                imuBuf.pop();
+            } else if (imuTime > endTime) {
+                break;
+            } else {
+              imuBuf.pop();
+            }
+        }
+        //todo 这里始终为0 问题最大
+		std::cout << "imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
+        //todo 最后卡在这里
+        //todo 这里可能进不去
+        if (!imuDataBetweenFrames.empty()) {
+          // 将对齐后的IMU数据存入imuBufAligned
+          imuBufAligned.push_back(imuDataBetweenFrames);
+          // 创建预积分器
+          auto preintegrator = std::make_shared<gtsam::PreintegratedImuMeasurements>(initialImuPreintegratorParam, priorImuBias);
+          double lastImuTime = -1;
+          // 进行预积分
+          for (const auto& imuData : imuDataBetweenFrames) {
+            double imuTime = imuData.header.stamp.toSec();
+            // 提取IMU加速度和角速度
+            // 假设IMU数据中包含必要的信息进行预积分
+            gtsam::Vector3 accel(imuData.linear_acceleration.x,
+                                 imuData.linear_acceleration.y,
+                                 imuData.linear_acceleration.z);
+            gtsam::Vector3 gyro(imuData.angular_velocity.x,
+                                imuData.angular_velocity.y,
+                                imuData.angular_velocity.z);
+            double dt = (lastImuTime < 0) ? (1.0 / 500.0) : (imuTime - lastImuTime);
+            // 将IMU数据添加到预积分器
+            preintegrator->integrateMeasurement(accel, gyro, dt);
+            lastImuTime = imuTime;
+          }
+          // 将预积分器存入imuMeasurementsWindow
+          imuMeasurementsWindow.push_back(preintegrator);
+        }
+
+       	if (imuDataBetweenFrames.empty()) {
+        	cond_var.notify_all();
+			return ;
+		}
+        Frame thisFrame;
+        // 滑窗内的位姿存储
+        gtsam::Pose3 lidarPose = gtsam::Pose3(gtsam::Rot3::Quaternion(currOdom->pose.pose.orientation.w,
+                                             currOdom->pose.pose.orientation.x,
+                                             currOdom->pose.pose.orientation.y,
+                                             currOdom->pose.pose.orientation.z),
+                            Point3(currOdom->pose.pose.position.x,
+                                   currOdom->pose.pose.position.y,
+                                   currOdom->pose.pose.position.z));
+        thisFrame.pose = lidarPose;
+        //todo 应该给多少 这里随便给，在process_lio中会利用IMU预积分器推导 check一下
+        thisFrame.velocity = gtsam::Vector3(0, 0, 0);
+        thisFrame.bias = gtsam::imuBias::ConstantBias();
+        frameWindow.push_back(thisFrame);
+        frameTimes.push_back(frameTime);
+//        std::cout << "frameWindow.size(): " << frameWindow.size() << std::endl;
+        //至此 当前帧 上一帧到当前帧的IMU预积分都放到滑窗中了 维护一下滑窗大小 windowSize(10) + 最新一帧
+        // 如果滑窗内的数据超过了指定大小，移除最旧的一帧
+        if (frameWindow.size() > windowSize + 1) {
+            frameWindow.erase(frameWindow.begin());
+        }
+        if (frameTimes.size() > windowSize + 1) {
+            frameTimes.erase(frameTimes.begin());
+        }
+        //维护imu预积分器和imuBufAligned的大小
+        if (imuMeasurementsWindow.size() > windowSize) {
+          imuMeasurementsWindow.erase(imuMeasurementsWindow.begin());
+        }
+        if (imuBufAligned.size() > windowSize) {
+          imuBufAligned.erase(imuBufAligned.begin());
+        }
+        //指向最新帧的索引
+        key++;
+        cond_var.notify_all();
+//    }
 } // laserOdometryHandler
 
 
@@ -376,15 +537,21 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 // 后端质心
 void SurfHandler(const sensor_msgs::PointCloud2ConstPtr &_laserSurf)
 {
-	mBuf.lock();
-	surfBuf.push(_laserSurf);
-	mBuf.unlock();
+  {
+    std::lock_guard<std::mutex> lock(mBuf);
+    surfBuf.push(_laserSurf);
+    std::cout << "loop模块接收balm只新: " << odometryBuf.size() << std::endl;
+  }
+  cond_var.notify_all();  // 唤醒等待的线程
 }
 void EdgeHandler(const sensor_msgs::PointCloud2ConstPtr &_laserEdge)
 {
-    mBuf.lock();
+  {
+    std::lock_guard<std::mutex> lock(mBuf);
     edgeBuf.push(_laserEdge);
-    mBuf.unlock();
+//    std::cout << "odometryBuf.size(): " << odometryBuf.size() << std::endl;
+  }
+  cond_var.notify_all();  // 唤醒等待的线程
 }
 
 
@@ -553,6 +720,92 @@ void pubPath( void )
     }
 
 } // pubPath
+
+void pubPath_lio( void )
+{
+    std::cout << "mark pubPath_lio" << std::endl;
+    // pub odom and path
+    nav_msgs::Odometry odomAftPGO;
+    nav_msgs::Path pathAftPGO;
+    pathAftPGO.header.frame_id = "camera_init";
+    //todo 如果很卡再把两个锁分开用
+//    mBuf.lock();
+    //[0, 9]
+    for (int node_idx=0; node_idx < windowSize; node_idx++) // -1 is just delayed visualization (because sometimes mutexed while adding(push_back) a new one)
+    {
+        // 经过isam回环修正后的位姿
+        const Frame& pose_set = frameWindow[node_idx];
+        nav_msgs::Odometry odomAftPGOthis;
+        odomAftPGOthis.header.frame_id = "camera_init";
+        odomAftPGOthis.child_frame_id = "/aft_pgo";
+        // 修正前和修正后的位姿的时间是相同的
+        odomAftPGOthis.header.stamp = ros::Time().fromSec(frameTimes[node_idx]);
+		// 获取位置并赋值
+		odomAftPGOthis.pose.pose.position.x = pose_set.pose.translation().x();
+		odomAftPGOthis.pose.pose.position.y = pose_set.pose.translation().y();
+		odomAftPGOthis.pose.pose.position.z = pose_set.pose.translation().z();
+
+		// 获取姿态并赋值
+		gtsam::Quaternion quaternion = pose_set.pose.rotation().toQuaternion();
+		odomAftPGOthis.pose.pose.orientation.x = quaternion.x();
+		odomAftPGOthis.pose.pose.orientation.y = quaternion.y();
+		odomAftPGOthis.pose.pose.orientation.z = quaternion.z();
+		odomAftPGOthis.pose.pose.orientation.w = quaternion.w();
+
+        odomAftPGO = odomAftPGOthis;
+
+        geometry_msgs::PoseStamped poseStampAftPGO;
+        poseStampAftPGO.header = odomAftPGOthis.header;
+        poseStampAftPGO.pose = odomAftPGOthis.pose.pose;
+
+        pathAftPGO.header.stamp = odomAftPGOthis.header.stamp;
+        pathAftPGO.header.frame_id = "camera_init";
+        pathAftPGO.poses.push_back(poseStampAftPGO);
+    }
+//    mBuf.unlock();
+
+    //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
+//    std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/kitti_dataset/result/loamgba/result_pose_09_30_0027_07_loop.txt", std::ios::app);
+//    pose1.setf(std::ios::scientific, std::ios::floatfield);
+//    //kitti数据集转换tum格式的数据是18位
+//    pose1.precision(9);
+//    //第一个激光帧时间 static变量 只赋值一次
+//    static double timeStart = odomAftPGO.header.stamp.toSec();
+//    auto T1 =ros::Time().fromSec(timeStart) ;
+//    // tf::Quaternion quat;
+//    // tf::createQuaternionMsgFromRollPitchYaw(double r, double p, double y);//返回四元数
+//    pose1<< odomAftPGO.header.stamp -T1<< " "
+//        << -odomAftPGO.pose.pose.position.x << " "
+//        << -odomAftPGO.pose.pose.position.z << " "
+//        << -odomAftPGO.pose.pose.position.y<< " "
+//        << odomAftPGO.pose.pose.orientation.x << " "
+//        << odomAftPGO.pose.pose.orientation.y << " "
+//        << odomAftPGO.pose.pose.orientation.z << " "
+//        << odomAftPGO.pose.pose.orientation.w << std::endl;
+//    pose1.close();
+
+
+    pubOdomAftPGO.publish(odomAftPGO); // 滑窗内最后一帧位姿
+    pubPathAftPGO.publish(pathAftPGO); // 轨迹
+
+    //cout << "pathAftPGO.poses = " << pathAftPGO.poses.size() << endl;
+    globalPath = pathAftPGO;
+    if(follow)
+    {
+        static tf::TransformBroadcaster br;
+        tf::Transform transform;
+        tf::Quaternion q;
+        transform.setOrigin(tf::Vector3(odomAftPGO.pose.pose.position.x, odomAftPGO.pose.pose.position.y, odomAftPGO.pose.pose.position.z));
+        q.setW(odomAftPGO.pose.pose.orientation.w);
+        q.setX(odomAftPGO.pose.pose.orientation.x);
+        q.setY(odomAftPGO.pose.pose.orientation.y);
+        q.setZ(odomAftPGO.pose.pose.orientation.z);
+        transform.setRotation(q);
+        br.sendTransform(tf::StampedTransform(transform, odomAftPGO.header.stamp, "camera_init", "/aft_pgo"));
+
+    }
+
+} // pubPath_lio
 
 void updatePoses(void)
 {
@@ -1039,10 +1292,10 @@ void process_viz_path(void)
     while (ros::ok()) 
     {
         rate.sleep();
-        if(recentIdxUpdated > 1) 
-        {
-            pubPath();
-        }
+//        if(recentIdxUpdated > 1)
+//        {
+            pubPath_lio();
+//        }
     }
 }
 
@@ -1185,7 +1438,8 @@ sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
 //向imuBuf中填入IMU信息
 void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
 {
-    mBuf.lock();
+  {
+    std::lock_guard<std::mutex> lock(mBuf);
     // imu原始测量数据转换到lidar系，加速度、角速度、RPY
     sensor_msgs::Imu thisImu = imuConverter(*imu_raw);
     // 添加当前帧imu数据到队列
@@ -1196,19 +1450,30 @@ void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
     //这里先不做对齐
     //目前不用IMU的姿态角信息
     imuBuf.push(thisImu);
-    mBuf.unlock();
+    std::cout << "imu回调函数中 imuBuf.size(): " << imuBuf.size() << std::endl;
+  }
+    cond_var.notify_all();  // 唤醒等待的线程
 }
 
 // 获取IMU数据并对齐到两个LiDAR帧之间
 void processIMU() {
+  //10hz处理
+//    ros::Rate rate(5);
     while (ros::ok()) {
+//      	rate.sleep();
+      	//降低频率否则会出问题
         std::vector<sensor_msgs::Imu> imuDataBetweenFrames;
+        //只进来一次
+//        std::cout << "获取mBuf前mark" << std::endl;
         std::unique_lock<std::mutex> lock(mBuf);
         //这里目前只考虑lidar里程计和imu信息，最后在把回环加入进来时再考虑点云信息
+        //todo 这里始终在0附近 进不去
+        std::cout << "processimu odometryBuf.size(): " << odometryBuf.size() << std::endl;
         cond_var.wait(lock, [] { return !odometryBuf.empty() && !imuBuf.empty(); });
         // 对齐两个LiDAR帧之间的IMU数据 把imuBuf分到imuBufAligned
         auto currOdom = odometryBuf.front();
         odometryBuf.pop();
+        frameTime = currOdom -> header.stamp.toSec();
         //第一帧处理
         if (lastOdom == nullptr) {
             //等待下一个激光帧
@@ -1228,9 +1493,13 @@ void processIMU() {
         	firstFrame.velocity = gtsam::Vector3(0, 0, 0);
         	firstFrame.bias = gtsam::imuBias::ConstantBias();
         	frameWindow.push_back(firstFrame);
+            frameTimes.push_back(frameTime);
         	// 如果滑窗内的数据超过了指定大小，移除最旧的一帧
         	if (frameWindow.size() > windowSize + 1) {
             	frameWindow.erase(frameWindow.begin());
+        	}
+            if (frameTimes.size() > windowSize + 1) {
+            	frameTimes.erase(frameTimes.begin());
         	}
         	//维护imu预积分器和imuBufAligned的大小
         	if (imuMeasurementsWindow.size() > windowSize) {
@@ -1244,14 +1513,24 @@ void processIMU() {
         }
         //非第一帧
         //IMU预积分
+        //todo 这里时间获取有问题 应该没问题
         double startTime = lastOdom->header.stamp.toSec();
         double endTime = currOdom->header.stamp.toSec();
         //todo 这里需要处理首尾部分的IMU数据，和lidar对齐，参考LIO-SAM
+        std::cout << "imuBuf.size(): " << imuBuf.size() << std::endl;
         while (!imuBuf.empty()) {
             auto imuData = imuBuf.front();
             double imuTime = imuData.header.stamp.toSec();
+            //这里进来了
+//            std::cout << "进来了" << std::endl;
+//            std::cout << "imuTime: " << imuTime << std::endl;
+//            std:;cout << "startTime: " << startTime << endl;
+//              std::cout << "endTime: " << endTime << endl;
             if (imuTime >= startTime && imuTime <= endTime) {
+              	//todo 这里没进来过
+              	std::cout << "放入imu信息"	<< std::endl;
                 imuDataBetweenFrames.push_back(imuData);
+                std::cout << "inside imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
                 imuBuf.pop();
             } else if (imuTime > endTime) {
                 break;
@@ -1259,7 +1538,9 @@ void processIMU() {
               imuBuf.pop();
             }
         }
-
+        //todo 这里始终为0 问题最大
+		std::cout << "imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
+                //todo 这里可能进不去
         if (!imuDataBetweenFrames.empty()) {
           // 将对齐后的IMU数据存入imuBufAligned
           imuBufAligned.push_back(imuDataBetweenFrames);
@@ -1300,10 +1581,15 @@ void processIMU() {
         thisFrame.velocity = gtsam::Vector3(0, 0, 0);
         thisFrame.bias = gtsam::imuBias::ConstantBias();
         frameWindow.push_back(thisFrame);
+        frameTimes.push_back(frameTime);
+//        std::cout << "frameWindow.size(): " << frameWindow.size() << std::endl;
         //至此 当前帧 上一帧到当前帧的IMU预积分都放到滑窗中了 维护一下滑窗大小 windowSize(10) + 最新一帧
         // 如果滑窗内的数据超过了指定大小，移除最旧的一帧
         if (frameWindow.size() > windowSize + 1) {
             frameWindow.erase(frameWindow.begin());
+        }
+        if (frameTimes.size() > windowSize + 1) {
+            frameTimes.erase(frameTimes.begin());
         }
         //维护imu预积分器和imuBufAligned的大小
         if (imuMeasurementsWindow.size() > windowSize) {
@@ -1312,7 +1598,6 @@ void processIMU() {
         if (imuBufAligned.size() > windowSize) {
           imuBufAligned.erase(imuBufAligned.begin());
         }
-
         //指向最新帧的索引
         key++;
         cond_var.notify_all();
@@ -1357,6 +1642,7 @@ void slideWindow() {
   	//[0, 9]
     for (int i = 0; i <= windowSize - 1; i++) {
         frameWindow[i] = frameWindow[i + 1];
+        frameTimes[i] = frameTimes[i + 1];
     }
     //[0 ,8]
     for (int i = 0; i <= windowSize - 2; i++) {
@@ -1366,6 +1652,7 @@ void slideWindow() {
     //把最后的都扔掉
     //todo 确认一下是否可以这样做
     frameWindow.pop_back();
+    frameTimes.pop_back();
     imuMeasurementsWindow.pop_back();
     imuBufAligned.pop_back();
     return;
@@ -1377,8 +1664,13 @@ void slideWindow() {
 void process_lio() {
     while (ros::ok()) {
         std::unique_lock<std::mutex> lock(mBuf);
+//        std::cout << "process_lio mark 1" << std::endl;
         //滑窗满了才做优化 算上最新帧共11帧
+        //todo 这里没输出?
+        std::cout << "frameWindow.size():" << frameWindow.size() << std::endl;
         cond_var.wait(lock, [] { return frameWindow.size() == windowSize + 1; });
+        //todo 这里进不来 上面没输出这里进来了
+        std::cout << "process_lio mark 0" << std::endl;
         //获取当前激光帧位姿
         float p_x;
         float p_y;
@@ -1387,6 +1679,7 @@ void process_lio() {
         float r_y;
         float r_z;
         float r_w;
+        std::cout << "process_lio mark 1" << std::endl;
         //LIO系统初始化
         if (systemInitialized == false) {
           //重置isam2优化器，清空大因子图
@@ -1418,6 +1711,7 @@ void process_lio() {
 
           //把滑窗内剩余帧也加入到因子图中 [1 - 10]
           for (int i = 1; i <= windowSize; i++) {
+                    std::cout << "process_lio 初始化 遍历" << i << std::endl;
             //添加相对位姿
             p_x = frameWindow[i - 1].pose.translation().x();
             p_y = frameWindow[i - 1].pose.translation().y();
@@ -1427,6 +1721,7 @@ void process_lio() {
             r_z = frameWindow[i - 1].pose.rotation().toQuaternion().z();
             r_w = frameWindow[i - 1].pose.rotation().toQuaternion().w();
             gtsam::Pose3 lidarPose_prev = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
+            std::cout << "process_lio 遍历 mark 1" << std::endl;
 
             p_x = frameWindow[i].pose.translation().x();
             p_y = frameWindow[i].pose.translation().y();
@@ -1437,18 +1732,27 @@ void process_lio() {
             r_w = frameWindow[i].pose.rotation().toQuaternion().w();
             gtsam::Pose3 lidarPose_curr = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
             gtsam::Pose3 relPose = lidarPose_prev.between(lidarPose_curr);
+            std::cout << "process_lio 遍历 mark 2" << std::endl;
             // 添加后端里程计因子，当前帧和上一帧的帧间约束
             graphFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(gtsam::Symbol('x', i - 1), gtsam::Symbol('x', i), relPose, odomNoise));
             graphValues.insert(gtsam::Symbol('x', i), lidarPose_curr);
+            std::cout << "process_lio 遍历 mark 3" << std::endl;
 
+//           	if (imuMeasurementsWindow[i - 1] == nullptr) std::cout << "nullptr!" <<std::endl;
+            //todo 这里有问题 大概率和imuMeasurements有关
+            std::cout << "imuMeasurementsWindow.size():" << imuMeasurementsWindow.size() << std::endl;
             //添加IMU预积分因子
             //上一帧位姿，上一帧速度，下一帧位姿，下一帧速度，上一帧帧偏置，预积分量
             gtsam::ImuFactor imu_factor(gtsam::Symbol('x', i - 1), gtsam::Symbol('v', i - 1), gtsam::Symbol('x', i), gtsam::Symbol('v', i), gtsam::Symbol('b', i - 1), (*imuMeasurementsWindow[i - 1]));
             graphFactors.add(imu_factor);
+                        std::cout << "process_lio 遍历 mark 4" << std::endl;
+
             //添加imu偏置因子，上一帧偏置，下一帧偏置，观测值为0（零偏尽量不动），噪声协方差（和IMU预积分器的积分时间相关）；deltaTij()是积分段的时间
             //噪声处理一下
             graphFactors.add(gtsam::BetweenFactor<gtsam::imuBias::ConstantBias>(gtsam::Symbol('b', i - 1), gtsam::Symbol('b', i), gtsam::imuBias::ConstantBias(),
                          gtsam::noiseModel::Diagonal::Sigmas(sqrt(imuMeasurementsWindow[i - 1]->deltaTij()) * noiseModelBetweenBias)));
+                        std::cout << "process_lio 遍历 mark 5" << std::endl;
+
             //用前一帧的状态、偏置，施加imu预计分量，得到当前帧的状态
             // 提取前一帧位姿、速度
             prevPose_  = frameWindow[i - 1].pose;
@@ -1465,6 +1769,8 @@ void process_lio() {
             graphValues.insert(gtsam::Symbol('b', i), prevBias_);
             //todo 及时更新每帧的速度和零偏 位姿还没有更新
             frameWindow[i].velocity = propState_.v();
+                        std::cout << "process_lio 遍历 mark 6" << std::endl;
+
             //零偏不用更新，第一次滑窗优化初始值都是0
 //            frameWindow[i].bias = propState_.b();
           }
@@ -1535,13 +1841,13 @@ void process_lio() {
               graphValues.insert(gtsam::Symbol('b', key - windowSize + i + 1), prevBias_);
             }//end 添加因子
         }//else end
-
+        std::cout << "process_lio mark2" << std::endl;
           //优化
           optimizer.update(graphFactors, graphValues);
           optimizer.update();
           graphFactors.resize(0);
           graphValues.clear();
-
+          std::cout << "process_lio mark3" << std::endl;
           //先把结果提取出来 放入frameWindow中 滑窗内第一帧永远是固定先验 所以只提取后面10帧
           gtsam::Values result = optimizer.calculateEstimate();
           for (int i = 1; i <= windowSize; i++) {
@@ -1549,6 +1855,7 @@ void process_lio() {
               frameWindow[i].velocity = result.at<gtsam::Vector3>(gtsam::Symbol('v', key - windowSize + i));
               frameWindow[i].bias = result.at<gtsam::imuBias::ConstantBias>(gtsam::Symbol('b', key - windowSize + i));
           }
+          std::cout << "process_lio mark4" << std::endl;
 
           //优化之后重新计算预积分
           //重置优化之后的偏置 [0, 9]
@@ -1558,7 +1865,9 @@ void process_lio() {
               //重新积分
               imuRepropagate((*imuMeasurementsWindow[i]), i);
           }
-
+                    std::cout << "process_lio mark5" << std::endl;
+		  pubPath_lio();
+          std::cout << "process_lio mark" << std::endl;
           //todo
           slideWindow();
         cond_var.notify_all();
@@ -1633,6 +1942,7 @@ int main(int argc, char **argv)
 
     //订阅IMU数据
     ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler, ros::TransportHints().tcpNoDelay());
+//    ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler);
 
     // ------------------------------------------------------------------
 	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
@@ -1643,6 +1953,7 @@ int main(int argc, char **argv)
 	pubLoopScanLocal = nh.advertise<sensor_msgs::PointCloud2>("/loop_scan_local", 100);
 	pubLoopSubmapLocal = nh.advertise<sensor_msgs::PointCloud2>("/loop_submap_local", 100);
 
+//    std::cout << "loop optimization main mark" << std::endl;
     //threads说明：回调函数向队列中填入信息
     //todo 维护滑窗优化的因子 和真正执行优化的关系还需要考虑一下
 //	std::thread posegraph_slam {process_pg}; // 后端里程计因子
@@ -1653,7 +1964,7 @@ int main(int argc, char **argv)
     //todo 原本为真正执行后端优化的部分，考虑和维护滑窗的线程的关系后决定是否要删除
 //    std::thread isam_update {process_isam};
     //对齐imu和lidar，做imu预积分
-    std::thread imuThread(processIMU);
+//    std::thread imuThread(processIMU);
 
     // isam2全局优化
     //暂时不要了
@@ -1669,7 +1980,7 @@ int main(int argc, char **argv)
 //    lc_detection.join();
 //    icp_calculation.join();
 //    isam_update.join();
-    imuThread.join();
+//    imuThread.join();
     sleep(10);
 	return 0;
 }

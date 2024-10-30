@@ -13,6 +13,7 @@
 
 #include <sstream>
 #include <iomanip>
+#include <sensor_msgs/Imu.h>
 
 #include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -48,6 +49,8 @@ int cloudSortInd[400000];
 int cloudNeighborPicked[400000];
 int cloudLabel[400000];
 bool comp (int i,int j) { return (cloudCurvature[i]<cloudCurvature[j]); }
+
+std::queue<sensor_msgs::Imu> imuBuf;
 
 struct VelodynePointXYZIRT
 {
@@ -328,9 +331,9 @@ void extractEdgePoint(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg, Sca
             laserCloudScans[scanID].points.push_back(point);
         }
         //输出laseCloudScans的具体数量
-        for (int i = 0; i < laserCloudScans.size(); i++) {
-        	std::cout << "laserCloudScans[" << i << "].points.size()" << laserCloudScans[i].points.size() << std::endl;
-        }
+//        for (int i = 0; i < laserCloudScans.size(); i++) {
+//        	std::cout << "laserCloudScans[" << i << "].points.size()" << laserCloudScans[i].points.size() << std::endl;
+//        }
     }
 
     // ------------------------------------------------------------------------------------
@@ -1451,7 +1454,7 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
         pts1.push_back(point_last);
 
     }
-    std::cout << "mark6.1" << std::endl;
+//    std::cout << "mark6.1" << std::endl;
     // -------------------------------------------------------------------------------
     // clock_t start, end;
     // double time;
@@ -1469,14 +1472,14 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
                                  loss_function,
                                  T_curr2last);
     }
-    std::cout << "mark6.2" << std::endl;
+//    std::cout << "mark6.2" << std::endl;
     ceres::Solver::Options options;
     options.max_num_iterations = 4;
     options.linear_solver_type = ceres::DENSE_SCHUR;
     options.minimizer_progress_to_stdout = false;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
-    std::cout << "mark6.3" << std::endl;
+//    std::cout << "mark6.3" << std::endl;
 
     Mat R_vec = (Mat_<double>(3,1) << T_curr2last[0], T_curr2last[1], T_curr2last[2]);
     Mat R_cvest;
@@ -1498,7 +1501,7 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
     //cout << "T = \n" << T.matrix().inverse()<<endl;
     t_w_curr = t_w_curr + q_w_curr * t_last_curr;
     q_w_curr = q_w_curr * q_last_curr;
-    std::cout << "mark6.4" << std::endl;
+//    std::cout << "mark6.4" << std::endl;
 
     // publish odometry
     nav_msgs::Odometry laserOdometry;
@@ -1520,17 +1523,17 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
     laserPath.poses.push_back(laserPose);
     laserPath.header.frame_id = "camera_init";
     pubLaserPath.publish(laserPath);
-    std::cout << "mark6.5" << std::endl;
+//    std::cout << "mark6.5" << std::endl;
 
     sensor_msgs::PointCloud2 center_msg;
-    std::cout << "keyPoints_curr.size(): " << keyPoints_curr.size() << std::endl;
+//    std::cout << "keyPoints_curr.size(): " << keyPoints_curr.size() << std::endl;
     pcl::toROSMsg(keyPoints_curr, center_msg);
     center_msg.header.stamp = timestamp_ros;
     center_msg.header.frame_id = "camera_init";
     pubCenter.publish(center_msg);
-    std::cout << "mark6.6" << std::endl;
+//    std::cout << "mark6.6" << std::endl;
     PointCloudToMapping(timestamp_ros);
-    std::cout << "mark6.7" << std::endl;
+//    std::cout << "mark6.7" << std::endl;
 }
 
 //接收livox lidar点云
@@ -1633,7 +1636,7 @@ void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         end = clock();
         time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
-        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
 
     if(0)
@@ -1646,7 +1649,7 @@ void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         end = clock();
         time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
-        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
 
     keyPoints_last = keyPoints_curr;
@@ -1686,14 +1689,31 @@ bool isValidPointCloud(const sensor_msgs::PointCloud2ConstPtr& cloud) {
     return true;
 }
 
+void imuHandler(const sensor_msgs::Imu::ConstPtr& imu_raw)
+{
+    // imu原始测量数据转换到lidar系，加速度、角速度、RPY
+//    sensor_msgs::Imu thisImu = imuConverter(*imu_raw);
+    sensor_msgs::Imu thisImu = *imu_raw;
+    // 添加当前帧imu数据到队列
+    // test 给零偏加固定偏移
+    // thisImu.angular_velocity.x += 3;
+    // thisImu.angular_velocity.y += 3;
+    // thisImu.angular_velocity.z += 3;
+    //这里先不做对齐
+    //目前不用IMU的姿态角信息
+    imuBuf.push(thisImu);
+//    std::cout << "前端接收的IMU信息时间戳：" << thisImu.header.stamp.toSec() << std::endl;
+//    std::cout << "imu回调函数中 imuBuf.size(): " << imuBuf.size() << std::endl;
+}
+
 void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 {
-    // 判断点云有效性
-    if (isValidPointCloud(laserCloudMsg)) {
-        std::cout << "Valid PointCloud2." << std::endl;
-    } else {
-        std::cout << "Invalid PointCloud2." << std::endl;
-    }
+//    // 判断点云有效性
+//    if (isValidPointCloud(laserCloudMsg)) {
+//        std::cout << "Valid PointCloud2." << std::endl;
+//    } else {
+//        std::cout << "Invalid PointCloud2." << std::endl;
+//    }
 
     clock_t start, end;
     double time;
@@ -1701,42 +1721,44 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     static bool init = false;
 
     ros::Time timestamp = laserCloudMsg->header.stamp;
+    //这里验证过lidar点云时间戳和imu时间戳是一致的
+//    std::cout << "前端接收到的lidar点云时间戳：" << timestamp.toSec() << std::endl;
     // 边缘点
     ScanEdgePoints edgePoints;
     // 1. 提取当前帧的边缘点，根据线束储存边缘点
     extractEdgePoint(laserCloudMsg, edgePoints);
-	std::cout << "mark1" << std::endl;
+//	std::cout << "mark1" << std::endl;
     pcl::PointCloud<pcl::PointXYZ> clusters_Cloud;
     ScanEdgePoints sectorAreaCloud;
     // 2.1 输入边缘点，输出3D扇形区域点，根据扇区储存边缘点
     divideArea(edgePoints, sectorAreaCloud);
-    std::cout << "mark2" << std::endl;
+//    std::cout << "mark2" << std::endl;
     ScanEdgePoints clusters;
     // 2.2 输入扇形区域点，输出聚合点 ，大容器：所有簇，小容器：一簇的所有点
     getCluster(sectorAreaCloud, clusters);
-	std::cout << "mark3" << std::endl;
+//	std::cout << "mark3" << std::endl;
     // 2.3 计算所有簇的质心
     getMeanKeyPoint(clusters, keyPoints_curr);
-    std::cout << "mark4" << std::endl;
+//    std::cout << "mark4" << std::endl;
     // 3. 创建描述子
     getDescriptors(keyPoints_curr, descriptors_curr);
-    std::cout << "mark5" << std::endl;
+//    std::cout << "mark5" << std::endl;
 
     if(1)//!keyPoints_last.empty()
     {
         vector<pair<int, int>> vMatchedIndex;
         // 4. 描述子匹配
         match(keyPoints_curr, keyPoints_last,descriptors_curr, descriptors_last, vMatchedIndex);
-        std::cout << "mark6" << std::endl;
+//        std::cout << "mark6" << std::endl;
         // cout << vMatchedIndex.data()->first << " " << vMatchedIndex.data()->second << endl;
         // cout << keyPoints_last.size() << endl;
         // 5. ICP
         Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
-        std::cout << "mark7" << std::endl;
+//        std::cout << "mark7" << std::endl;
         end = clock();
         time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
-        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
 
     if(0)
@@ -1749,7 +1771,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         end = clock();
         time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
-        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
 
     keyPoints_last = keyPoints_curr;
@@ -1794,6 +1816,8 @@ int main(int argc, char** argv)
     pubCenter = nh.advertise<sensor_msgs::PointCloud2>("/center", 100);
     ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 100, laserCloudHandler);
 //    ros::Subscriber subLaserCloud = nh.subscribe<livox_ros_driver::CustomMsg>("/velodyne_points", 100, avia_handler);
+    //订阅IMU数据 向后发送
+    ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler, ros::TransportHints().tcpNoDelay());
     ros::spin();
 
     return 0;

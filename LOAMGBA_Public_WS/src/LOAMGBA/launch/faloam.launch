@@ -29,7 +29,7 @@
     <param name="sc_max_radius" type="double" value="80.0"/> <!-- for outdoor -->
 
     <param name="vizMapFreq" type="double" value="0.1"/><!-- 0.1 -->
-    <param name="vizPathFreq" type="double" value="10"/>
+    <param name="vizPathFreq" type="double" value="100"/>
 
     <param name="processIsamFreq" type="double" value="10.0"/><!-- 20-->
     <param name="loopClosureFreq" type="double" value="10.0"/><!-- 30 -->

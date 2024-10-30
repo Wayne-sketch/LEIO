@@ -42,7 +42,7 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-
+#include <iomanip>  // cout输出精度设置
 struct Params {
     // refer to the website:http://ramm.bnu.edu.cn/projects/CSF/ for the setting of these paramters
     bool bSloopSmooth;

@@ -272,6 +272,9 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &laserOdometry)
 {
     mBuf.lock();
     odometryBuf.push(laserOdometry);
+//    double timestamp = laserOdometry->header.stamp.toSec(); // 将时间戳转换为秒
+//    //这里验证过是正确的
+//    std::cout << "scan to map 接收的里程计时间戳：" << timestamp << std::endl;
     mBuf.unlock();
     // high frequence publish
     Eigen::Quaterniond q_wodom_curr;
@@ -640,7 +643,7 @@ void process()
             // 小局部地图中的点会不断的变多
             //printf(" corner =  %d  surf = %d center = %d\n", laserCloudCornerFromMapNum, laserCloudSurfFromMapNum, centerFromMapNum);// 3852  9097
             // 第一帧点云还没加入到cube中，此时不会满足这一条件
-            std::cout << "laserCloudCornerFromMapNum: " << laserCloudCornerFromMapNum <<std::endl;
+//            std::cout << "laserCloudCornerFromMapNum: " << laserCloudCornerFromMapNum <<std::endl;
             if (laserCloudCornerFromMapNum > 10  )
             {
                 TicToc t_opt;
