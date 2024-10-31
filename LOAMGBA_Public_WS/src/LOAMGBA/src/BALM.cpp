@@ -234,6 +234,8 @@ int main(int argc, char **argv)
     pcl::PointCloud<PointType>::Ptr pl_ground(new pcl::PointCloud<PointType>);
     pcl::PointCloud<PointType>::Ptr pl_offground(new pcl::PointCloud<PointType>);
 
+    //todo 记录时间戳
+    vector<uint64_t> pl_time_buf;
     vector<pcl::PointCloud<PointType>::Ptr> pl_ground_buf;
     vector<pcl::PointCloud<PointType>::Ptr> pl_edge_buf;
     vector<pcl::PointCloud<PointType>::Ptr> pl_offground_buf;
@@ -377,6 +379,8 @@ int main(int argc, char **argv)
         // 发布优化前的位姿
         pub_pose.publish(parray);
         pl_ground_buf.push_back(pl_ground_temp);
+        //记录每一帧的时间戳 要和pl_ground_buf对应起来
+        pl_time_buf.push_back(time_odom);
         pl_edge_buf.push_back(pl_edge_temp);
         pl_offground_buf.push_back(pl_offground_temp);
 
@@ -513,7 +517,10 @@ int main(int argc, char **argv)
                 nav_msgs::Odometry odomAftMapped;
                 //todo 这里有问题 时间戳赋值有问题
                 odomAftMapped.header.frame_id = "camera_init";
-                ros::Time time = ros::Time::now();
+//                ros::Time time = ros::Time::now();
+//                odomAftMapped.header.stamp = time;
+                //todo 时间戳赋值对应到原本的位姿上 可能因为发布逻辑导致时间戳混乱
+                ros::Time time = ros::Time().fromNSec(pl_time_buf[window_base + 1]);
                 odomAftMapped.header.stamp = time;
                 odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
                 odomAftMapped.pose.pose.orientation.y = q_w_curr.y();
