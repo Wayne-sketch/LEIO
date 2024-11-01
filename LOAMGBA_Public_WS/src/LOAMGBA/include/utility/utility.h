@@ -1,139 +1,185 @@
 #pragma once
-#ifndef UTILITY_H
-#define UTILITY_H
-#include <ros/ros.h>
-
-#include <std_msgs/Header.h>
-#include <std_msgs/Float64MultiArray.h>
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/NavSatFix.h>
-#include <nav_msgs/Odometry.h>
-#include <nav_msgs/Path.h>
-
-#include <opencv2/opencv.hpp>
-
-#include <vector>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <cmath>
-#include <algorithm>
-#include <queue>
-#include <deque>
-#include <iostream>
-#include <fstream>
-#include <ctime>
-#include <cfloat>
-#include <iterator>
-#include <sstream>
-#include <string>
-#include <limits>
-#include <iomanip>
-#include <array>
-#include <thread>
-#include <mutex>
+#include <cassert>
+#include <cstring>
+#include <eigen3/Eigen/Dense>
 
-using namespace std;
-
-class ParamServer
+class Utility
 {
-public:
-
-  ros::NodeHandle nh;
-
-  string imuTopic;
-
-  // IMU参数
-  float imuAccNoise;          // 加速度噪声标准差
-  float imuGyrNoise;          // 角速度噪声标准差
-  float imuAccBiasN;          //
-  float imuGyrBiasN;
-  float imuGravity;           // 重力加速度
-  float imuRPYWeight;
-  vector<double> extRotV;
-  vector<double> extRPYV;
-  vector<double> extTransV;
-  Eigen::Matrix3d extRot;     // xyz坐标系旋转
-  Eigen::Matrix3d extRPY;     // RPY欧拉角的变换关系
-  Eigen::Vector3d extTrans;   // xyz坐标系平移
-  Eigen::Quaterniond extQRPY;
-
-
-  ParamServer()
-  {
-    nh.param<std::string>("lio_sam/imuTopic", imuTopic, "imu_correct");
-
-    nh.param<float>("lio_sam/imuAccNoise", imuAccNoise, 0.01);
-    nh.param<float>("lio_sam/imuGyrNoise", imuGyrNoise, 0.001);
-    nh.param<float>("lio_sam/imuAccBiasN", imuAccBiasN, 0.0002);
-    nh.param<float>("lio_sam/imuGyrBiasN", imuGyrBiasN, 0.00003);
-    nh.param<float>("lio_sam/imuGravity", imuGravity, 9.80511);
-    nh.param<float>("lio_sam/imuRPYWeight", imuRPYWeight, 0.01);
-    nh.param<vector<double>>("lio_sam/extrinsicRot", extRotV, vector<double>());
-    nh.param<vector<double>>("lio_sam/extrinsicRPY", extRPYV, vector<double>());
-    nh.param<vector<double>>("lio_sam/extrinsicTrans", extTransV, vector<double>());
-    extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);
-    extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);
-    extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);
-    extQRPY = Eigen::Quaterniond(extRPY).inverse();
-
-    usleep(100);
-}
-
-/**
- * imu原始测量数据转换到lidar系，加速度、角速度、RPY
-*/
-sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
-{
-    sensor_msgs::Imu imu_out = imu_in;
-    // 加速度，只跟xyz坐标系的旋转有关系
-    Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y, imu_in.linear_acceleration.z);
-    acc = extRot * acc;
-    imu_out.linear_acceleration.x = acc.x();
-    imu_out.linear_acceleration.y = acc.y();
-    imu_out.linear_acceleration.z = acc.z();
-    // 角速度，只跟xyz坐标系的旋转有关系
-    Eigen::Vector3d gyr(imu_in.angular_velocity.x, imu_in.angular_velocity.y, imu_in.angular_velocity.z);
-    gyr = extRot * gyr;
-    imu_out.angular_velocity.x = gyr.x();
-    imu_out.angular_velocity.y = gyr.y();
-    imu_out.angular_velocity.z = gyr.z();
-    // RPY
-    Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x, imu_in.orientation.y, imu_in.orientation.z);
-    // 为什么是右乘，可以动手画一下看看
-    Eigen::Quaterniond q_final = q_from * extQRPY;
-    imu_out.orientation.x = q_final.x();
-    imu_out.orientation.y = q_final.y();
-    imu_out.orientation.z = q_final.z();
-    imu_out.orientation.w = q_final.w();
-
-    if (sqrt(q_final.x()*q_final.x() + q_final.y()*q_final.y() + q_final.z()*q_final.z() + q_final.w()*q_final.w()) < 0.1)
+  public:
+    template <typename Derived>
+    static Eigen::Quaternion<typename Derived::Scalar> deltaQ(const Eigen::MatrixBase<Derived> &theta)
     {
-        ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
-        ros::shutdown();
+        typedef typename Derived::Scalar Scalar_t;
+
+        Eigen::Quaternion<Scalar_t> dq;
+        Eigen::Matrix<Scalar_t, 3, 1> half_theta = theta;
+        half_theta /= static_cast<Scalar_t>(2.0);
+        dq.w() = static_cast<Scalar_t>(1.0);
+        dq.x() = half_theta.x();
+        dq.y() = half_theta.y();
+        dq.z() = half_theta.z();
+        return dq;
     }
 
-    return imu_out;
-}
+    template <typename Derived>
+    static Eigen::Matrix<typename Derived::Scalar, 3, 3> skewSymmetric(const Eigen::MatrixBase<Derived> &q)
+    {
+        Eigen::Matrix<typename Derived::Scalar, 3, 3> ans;
+        ans << typename Derived::Scalar(0), -q(2), q(1),
+            q(2), typename Derived::Scalar(0), -q(0),
+            -q(1), q(0), typename Derived::Scalar(0);
+        return ans;
+    }
 
+    template <typename Derived>
+    static Eigen::Quaternion<typename Derived::Scalar> positify(const Eigen::QuaternionBase<Derived> &q)
+    {
+        //printf("a: %f %f %f %f", q.w(), q.x(), q.y(), q.z());
+        //Eigen::Quaternion<typename Derived::Scalar> p(-q.w(), -q.x(), -q.y(), -q.z());
+        //printf("b: %f %f %f %f", p.w(), p.x(), p.y(), p.z());
+        //return q.template w() >= (typename Derived::Scalar)(0.0) ? q : Eigen::Quaternion<typename Derived::Scalar>(-q.w(), -q.x(), -q.y(), -q.z());
+        return q;
+    }
 
+    template <typename Derived>
+    static Eigen::Matrix<typename Derived::Scalar, 4, 4> Qleft(const Eigen::QuaternionBase<Derived> &q)
+    {
+        Eigen::Quaternion<typename Derived::Scalar> qq = positify(q);
+        Eigen::Matrix<typename Derived::Scalar, 4, 4> ans;
+        ans(0, 0) = qq.w(), ans.template block<1, 3>(0, 1) = -qq.vec().transpose();
+        ans.template block<3, 1>(1, 0) = qq.vec(), ans.template block<3, 3>(1, 1) = qq.w() * Eigen::Matrix<typename Derived::Scalar, 3, 3>::Identity() + skewSymmetric(qq.vec());
+        return ans;
+    }
 
+    template <typename Derived>
+    static Eigen::Matrix<typename Derived::Scalar, 4, 4> Qright(const Eigen::QuaternionBase<Derived> &p)
+    {
+        Eigen::Quaternion<typename Derived::Scalar> pp = positify(p);
+        Eigen::Matrix<typename Derived::Scalar, 4, 4> ans;
+        ans(0, 0) = pp.w(), ans.template block<1, 3>(0, 1) = -pp.vec().transpose();
+        ans.template block<3, 1>(1, 0) = pp.vec(), ans.template block<3, 3>(1, 1) = pp.w() * Eigen::Matrix<typename Derived::Scalar, 3, 3>::Identity() - skewSymmetric(pp.vec());
+        return ans;
+    }
 
+    static Eigen::Vector3d R2ypr(const Eigen::Matrix3d &R)
+    {
+        Eigen::Vector3d n = R.col(0);
+        Eigen::Vector3d o = R.col(1);
+        Eigen::Vector3d a = R.col(2);
+
+        Eigen::Vector3d ypr(3);
+        double y = atan2(n(1), n(0));
+        double p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
+        double r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
+        ypr(0) = y;
+        ypr(1) = p;
+        ypr(2) = r;
+
+        return ypr / M_PI * 180.0;
+    }
+
+    template <typename Derived>
+    static Eigen::Matrix<typename Derived::Scalar, 3, 3> ypr2R(const Eigen::MatrixBase<Derived> &ypr)
+    {
+        typedef typename Derived::Scalar Scalar_t;
+
+        Scalar_t y = ypr(0) / 180.0 * M_PI;
+        Scalar_t p = ypr(1) / 180.0 * M_PI;
+        Scalar_t r = ypr(2) / 180.0 * M_PI;
+
+        Eigen::Matrix<Scalar_t, 3, 3> Rz;
+        Rz << cos(y), -sin(y), 0,
+            sin(y), cos(y), 0,
+            0, 0, 1;
+
+        Eigen::Matrix<Scalar_t, 3, 3> Ry;
+        Ry << cos(p), 0., sin(p),
+            0., 1., 0.,
+            -sin(p), 0., cos(p);
+
+        Eigen::Matrix<Scalar_t, 3, 3> Rx;
+        Rx << 1., 0., 0.,
+            0., cos(r), -sin(r),
+            0., sin(r), cos(r);
+
+        return Rz * Ry * Rx;
+    }
+
+    static Eigen::Matrix3d g2R(const Eigen::Vector3d &g);
+
+    template <size_t N>
+    struct uint_
+    {
+    };
+
+    template <size_t N, typename Lambda, typename IterT>
+    void unroller(const Lambda &f, const IterT &iter, uint_<N>)
+    {
+        unroller(f, iter, uint_<N - 1>());
+        f(iter + N);
+    }
+
+    template <typename Lambda, typename IterT>
+    void unroller(const Lambda &f, const IterT &iter, uint_<0>)
+    {
+        f(iter);
+    }
+
+    template <typename T>
+    static T normalizeAngle(const T& angle_degrees) {
+      T two_pi(2.0 * 180);
+      if (angle_degrees > 0)
+      return angle_degrees -
+          two_pi * std::floor((angle_degrees + T(180)) / two_pi);
+      else
+        return angle_degrees +
+            two_pi * std::floor((-angle_degrees + T(180)) / two_pi);
+    };
 };
 
+class FileSystemHelper
+{
+  public:
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#endif //UTILITY_H
+    /******************************************************************************
+     * Recursively create directory if `path` not exists.
+     * Return 0 if success.
+     *****************************************************************************/
+    static int createDirectoryIfNotExists(const char *path)
+    {
+        struct stat info;
+        int statRC = stat(path, &info);
+        if( statRC != 0 )
+        {
+            if (errno == ENOENT)  
+            {
+                printf("%s not exists, trying to create it \n", path);
+                if (! createDirectoryIfNotExists(dirname(strdupa(path))))
+                {
+                    if (mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
+                    {
+                        fprintf(stderr, "Failed to create folder %s \n", path);
+                        return 1;
+                    }
+                    else
+                        return 0;
+                }
+                else 
+                    return 1;
+            } // directory not exists
+            if (errno == ENOTDIR) 
+            { 
+                fprintf(stderr, "%s is not a directory path \n", path);
+                return 1; 
+            } // something in path prefix is not a dir
+            return 1;
+        }
+        return ( info.st_mode & S_IFDIR ) ? 0 : 1;
+    }
+};
