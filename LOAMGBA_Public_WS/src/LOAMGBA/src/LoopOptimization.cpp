@@ -70,6 +70,7 @@ bool useCSF;
 bool follow;
 bool viewMap;
 bool useIsam;
+bool needToOptimize = false;
 
 double FilterGroundLeaf;
 
@@ -269,7 +270,7 @@ void writeEdge(const std::pair<int, int> _node_idx_pair, const gtsam::Pose3& _re
     std::string curEdgeInfo 
     {
         "EDGE_SE3:QUAT " + std::to_string(_node_idx_pair.first) + " " + std::to_string(_node_idx_pair.second) + " "
-        + std::to_string(t.x()) + " " + std::to_string(t.y()) + " " + std::to_string(t.z())  + " " 
+        + std::to_string(t.x()) + " " + std::to_string(t.y()) + " " + std::to_string(t.z())  + " "
         + std::to_string(R.toQuaternion().x()) + " " + std::to_string(R.toQuaternion().y()) + " " 
         + std::to_string(R.toQuaternion().z()) + " " + std::to_string(R.toQuaternion().w()) };
 
@@ -411,20 +412,6 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
         	firstFrame.bias = gtsam::imuBias::ConstantBias();
         	frameWindow.push_back(firstFrame);
             frameTimes.push_back(frameTime);
-        	// 如果滑窗内的数据超过了指定大小，移除最旧的一帧
-        	if (frameWindow.size() > windowSize + 1) {
-            	frameWindow.erase(frameWindow.begin());
-        	}
-            if (frameTimes.size() > windowSize + 1) {
-            	frameTimes.erase(frameTimes.begin());
-        	}
-        	//维护imu预积分器和imuBufAligned的大小
-        	if (imuMeasurementsWindow.size() > windowSize) {
-          		imuMeasurementsWindow.erase(imuMeasurementsWindow.begin());
-        	}
-        	if (imuBufAligned.size() > windowSize) {
-          		imuBufAligned.erase(imuBufAligned.begin());
-        	}
             //等待下一个激光帧
             lastOdom = currOdom;
             odometryBuf.pop();
@@ -437,13 +424,14 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
         }
         //非第一帧
         //IMU预积分
-        //todo 这里时间获取有问题 应该没问题 有时候startTime和endTime是相同的
+        //todo 有时候startTime和endTime是相同的
         double startTime = lastOdom->header.stamp.toSec();
         double endTime = currOdom->header.stamp.toSec();
         //todo 这里能解决问题 还没找到问题原因
         if (startTime == endTime) {
    			odometryBuf.pop();
       		lastOdom = currOdom;
+            cond_var.notify_all();
     		return;
 		}
         //todo 这里需要处理首尾部分的IMU数据，和lidar对齐，参考LIO-SAM
@@ -471,7 +459,7 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
             }
         }
 
-		std::cout << "imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
+//		std::cout << "imuDataBetweenFrames.size(): " << imuDataBetweenFrames.size() << std::endl;
         if (!imuDataBetweenFrames.empty()) {
           // 将对齐后的IMU数据存入imuBufAligned
           imuBufAligned.push_back(imuDataBetweenFrames);
@@ -520,26 +508,20 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 //        std::cout << "frameWindow.size(): " << frameWindow.size() << std::endl;
         //至此 当前帧 上一帧到当前帧的IMU预积分都放到滑窗中了 维护一下滑窗大小 windowSize(10) + 最新一帧
         // 如果滑窗内的数据超过了指定大小，移除最旧的一帧
-        if (frameWindow.size() > windowSize + 1) {
+        if (frameWindow.size() > windowSize + 1 && frameTimes.size() > windowSize + 1 && imuMeasurementsWindow.size() > windowSize && imuBufAligned.size() > windowSize) {
             frameWindow.erase(frameWindow.begin());
-        }
-        if (frameTimes.size() > windowSize + 1) {
             frameTimes.erase(frameTimes.begin());
+            imuMeasurementsWindow.erase(imuMeasurementsWindow.begin());
+            imuBufAligned.erase(imuBufAligned.begin());
+//            slideWindow();
         }
-        //维护imu预积分器和imuBufAligned的大小
-        if (imuMeasurementsWindow.size() > windowSize) {
-          imuMeasurementsWindow.erase(imuMeasurementsWindow.begin());
-        }
-        if (imuBufAligned.size() > windowSize) {
-          imuBufAligned.erase(imuBufAligned.begin());
-        }
-        //指向最新帧的索引
-        key++;
-
         //上一帧更新为当前帧
         lastOdom = currOdom;
         //已经把lidar帧放进来了，再pop
         odometryBuf.pop();
+        //指向最新帧的索引
+        key++;
+        needToOptimize = true;
         cond_var.notify_all();
 //    }
 } // laserOdometryHandler
@@ -1676,12 +1658,18 @@ void slideWindow() {
 //先实现基本的LIO，然后把LOAMGBA内容融合进来
 //维护滑窗并优化
 void process_lio() {
+
     while (ros::ok()) {
         std::unique_lock<std::mutex> lock(mBuf);
 //        std::cout << "process_lio mark 1" << std::endl;
         //滑窗满了才做优化 算上最新帧共11帧
 //        std::cout << "frameWindow.size():" << frameWindow.size() << std::endl;
         cond_var.wait(lock, [] { return frameWindow.size() == windowSize + 1; });
+        if (needToOptimize == false) {
+          std::cout << "要跳过 此时key=" << key <<std::endl;
+          cond_var.notify_all();
+          continue;
+        }
 //        std::cout << "process_lio mark 0" << std::endl;
         //获取当前激光帧位姿
         float p_x;
@@ -1717,6 +1705,7 @@ void process_lio() {
           gtsam::PriorFactor<gtsam::imuBias::ConstantBias> priorBias(gtsam::Symbol('b', 0), gtsam::imuBias::ConstantBias(), priorBiasNoise);
           graphFactors.add(priorBias);
           //变量节点赋初值
+          std::cout << "初始化要添加x v b" << 0 << std::endl;
           graphValues.insert(gtsam::Symbol('x', 0), lidarPose0);
           graphValues.insert(gtsam::Symbol('v', 0), gtsam::Vector3(0, 0, 0));
           graphValues.insert(gtsam::Symbol('b', 0), gtsam::imuBias::ConstantBias());
@@ -1776,6 +1765,7 @@ void process_lio() {
             gtsam::NavState propState_ = imuMeasurementsWindow[i - 1]->predict(prevState_, prevBias_);
             // 变量节点赋初值
 //            if (!graphValues.exists(gtsam::Symbol('x', i))) {
+                      std::cout << "初始化要添加x v b" << i << std::endl;
     			graphValues.insert(gtsam::Symbol('x', i), lidarPose_curr);
 //			}
 //            if (!graphValues.exists(gtsam::Symbol('v', i))) {
@@ -1811,14 +1801,15 @@ void process_lio() {
             r_w = frameWindow[0].pose.rotation().toQuaternion().w();
             gtsam::Pose3 lidarPose0 = gtsam::Pose3(gtsam::Rot3::Quaternion(r_w, r_x, r_y, r_z), gtsam::Point3(p_x, p_y, p_z));
             //todo 可能需要作为先验约束
-            graphValues.insert(gtsam::Symbol('x', key - windowSize + 1), lidarPose0);
-            //todo 可能需要添加零偏和速度
+//            std::cout << "优化阶段要添加x" << key - windowSize + 1 << std::endl;
+//            graphValues.insert(gtsam::Symbol('x', key - windowSize + 1), lidarPose0);
+            //todo 需要添加零偏和速度
 
             //添加相对位姿因子
             //todo 这里确认一下gtsam维护因子图的索引机制 参考LIO-SAM 每100帧重启一次gtsam优化器，前面的信息可以像LIO-SAM一样作为新的先验，也可以边缘化一下，边缘化是最正确合理的方式 gtsam或者自动边缘化，或者计算边缘化协方差后手动删除因子
             //这里的索引需要倒推，确认滑窗大小的一致性，算上最新帧有10帧，windowSize=10
             //把滑窗内所有帧加入到因子图中
-            for (int i = 1; i < windowSize; i++) {
+            for (int i = 1; i <= windowSize; i++) {
               //添加相对位姿
               p_x = frameWindow[i - 1].pose.translation().x();
               p_y = frameWindow[i - 1].pose.translation().y();
@@ -1858,12 +1849,17 @@ void process_lio() {
               prevState_ = gtsam::NavState(prevPose_, prevVel_);
               gtsam::NavState propState_ = imuMeasurementsWindow[i - 1]->predict(prevState_, prevBias_);
               // 变量节点赋初值
-              graphValues.insert(gtsam::Symbol('x', key - windowSize + i + 1), lidarPose_curr);
-              graphValues.insert(gtsam::Symbol('v', key - windowSize + i + 1), propState_.v());
-              graphValues.insert(gtsam::Symbol('b', key - windowSize + i + 1), prevBias_);
+              //todo 第二次调用出问题了
+              if (i == windowSize) {
+              	std::cout << "优化阶段要添加x v b" << key - windowSize + i + 1 << "此时key =" << key << std::endl;
+              	graphValues.insert(gtsam::Symbol('x', key - windowSize + i + 1), lidarPose_curr);
+              	graphValues.insert(gtsam::Symbol('v', key - windowSize + i + 1), propState_.v());
+              	graphValues.insert(gtsam::Symbol('b', key - windowSize + i + 1), prevBias_);
+              }
             }//end 添加因子
         }//else end
         std::cout << "process_lio mark2" << std::endl;
+        //todo 会卡在这里 查看一下有无重复的键
           //优化
           optimizer.update(graphFactors, graphValues);
           optimizer.update();
@@ -1887,12 +1883,12 @@ void process_lio() {
               //重新积分
               imuRepropagate((*imuMeasurementsWindow[i]), i);
           }
-                    std::cout << "process_lio mark5" << std::endl;
+          std::cout << "process_lio mark5" << std::endl;
 		  pubPath_lio();
           std::cout << "process_lio mark" << std::endl;
-          //todo
-          slideWindow();
+          needToOptimize = false;
         cond_var.notify_all();
+        //todo 条件变量通知后会立刻又进入到这个函数中
     } //end while( ros::ok())
 }
 
