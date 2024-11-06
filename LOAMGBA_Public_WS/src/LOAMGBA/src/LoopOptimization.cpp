@@ -57,6 +57,32 @@
 #include "factor/MarginalizationFactor.hpp"
 #include "factor/PivotPointPlaneFactor.hpp"
 
+//todo 全局变量、类型定义 能直接初始化在定义时初始化 不能的放在main函数中初始化
+//消息buffer + 消息队列锁
+std::queue<sensor_msgs::ImuConstPtr> imu_buf;
+double last_imu_t = 0;   //imuHandler使用
+std::queue<nav_msgs::Odometry::ConstPtr> odometryBuf;
+std::queue<sensor_msgs::PointCloud2ConstPtr> surfBuf;
+std::queue<sensor_msgs::PointCloud2ConstPtr> edgeBuf;
+std::mutex mBuf;
+std::mutex m_state; //没用上
+std::condition_variable con;
+//LIO estimator
+
+//自定义的雷达数据结构 包含点云 里程计信息 用于getmeasurements()对齐
+class LidarInfo
+{
+	public:
+    	LidarInfo(){};
+        sensor_msgs::PointCloud2 surf_cloud_;
+    	sensor_msgs::PointCloud2 edge_cloud_;
+		nav_msgs::Odometry laser_odometry_;
+}
+
+
+
+
+
 using std::cout;
 using std::endl;
 using namespace std;
@@ -220,17 +246,14 @@ Eigen::Quaterniond Q_WI_; ///< Q_WI is the rotation from the inertial frame into
 
 //todo 变量命名vins替换成lio-mapping
 //getMeasurements版本用这个
-std::condition_variable con;
 const int window_size = 10;
 const int opt_window_size = 5;
 int init_window_factor = 3;
 int estimate_extrinsic = 2;
-//imuHandler使用
-double last_imu_t = 0;
+
 bool init_imu = 1;
 bool init_odom = 0;
 double latest_time;
-int sum_of_wait = 0;
 double current_time = -1;
 //frame_count到达window_size后就不再增加
 int frame_count = 0;
@@ -247,7 +270,7 @@ Eigen::Vector3d tmp_Bg;
 Eigen::Vector3d acc_last_, gyr_last_;
 Eigen::Vector3d g_vec_;
 
-std::mutex m_state;
+
 bool first_imu = false;
 //imu预积分滑窗
 //todo 把vins替换成lio-mapping
@@ -287,15 +310,7 @@ enum SolverFlag
     NON_LINEAR
 };
 
-//自定义的雷达数据结构 包含点云 里程计信息 用于getmeasurements()对齐
-class LidarInfo
-{
-	public:
-    	LidarInfo(){};
-        sensor_msgs::PointCloud2 surf_cloud_;
-    	sensor_msgs::PointCloud2 edge_cloud_;
-		nav_msgs::Odometry laser_odometry_;
-}
+
 
 struct LaserTransform {
   LaserTransform() {};
@@ -342,13 +357,7 @@ double para_SpeedBias[window_size + 1][SIZE_SPEEDBIAS];
 bool failure_occur = 0;
 vector<Vector3d> key_poses;
 
-//buffer
-std::queue<sensor_msgs::ImuConstPtr> imu_buf;
-std::queue<nav_msgs::Odometry::ConstPtr> odometryBuf;
-std::queue<sensor_msgs::PointCloud2ConstPtr> surfBuf;
-std::queue<sensor_msgs::PointCloud2ConstPtr> edgeBuf;
-//消息队列锁
-std::mutex mBuf;
+
 
 double timeLaserOdometry = 0.0;
 double timeCenter= 0.0;
@@ -375,70 +384,7 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
     con.notify_one();
 }
 
-//对齐数据 改成自定义的数据结构 包含点云、激光里程计、预留事件相机帧
-std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>>
-getMeasurements()
-{
-    std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>> measurements;
 
-    while (true)
-    {
-        if (imu_buf.empty() || odometryBuf.empty())
-            return measurements;
-
-        if (!(imu_buf.back()->header.stamp.toSec() > odometryBuf.front()->header.stamp.toSec()))
-        {
-            //ROS_WARN("wait for imu, only should happen at the beginning");
-            sum_of_wait++;
-            return measurements;
-        }
-
-        if (!(imu_buf.front()->header.stamp.toSec() < odometryBuf.front()->header.stamp.toSec()))
-        {
-            ROS_WARN("throw odom, only should happen at the beginning");
-            if(odometryBuf.size() != 0)
-            	odometryBuf.pop();
-            if(surfBuf.size() != 0)
-            	surfBuf.pop();
-            if(edgeBuf.size() != 0)
-            	edgeBuf.pop();
-            continue;
-        }
-
-        nav_msgs::Odometry::ConstPtr odom_msg;
-        if(odometryBuf.size() != 0) {
-        	odom_msg = odometryBuf.front();
-            odometryBuf.pop();
-        }
-        sensor_msgs::PointCloud2ConstPtr surf_msg;
-        if(surfBuf.size() != 0) {
-        	surf_msg = surfBuf.front();
-            surfBuf.pop();
-        }
-        sensor_msgs::PointCloud2ConstPtr edge_msg;
-        if(edgeBuf.size() != 0) {
-        	edge_msg = edgeBuf.front();
-            edgeBuf.pop();
-        }
-		LidarInfo lidar_info;
-        lidar_info.laser_odometry_ = odom_msg;
-        lidar_info.surf_cloud_ = surf_msg;
-        lidar_info.edge_cloud_ = edge_msg;
-
-        std::vector<sensor_msgs::ImuConstPtr> IMUs;
-        while (imu_buf.front()->header.stamp.toSec() < odom_msg->header.stamp.toSec())
-        {
-            IMUs.emplace_back(imu_buf.front());
-            imu_buf.pop();
-        }
-        IMUs.emplace_back(imu_buf.front());
-        if (IMUs.empty())
-            ROS_WARN("no imu between two image");
-
-        measurements.emplace_back(IMUs, lidar_info);
-    }
-    return measurements;
-}
 
 //对imu做积分 把最新状态赋值给最新lidar帧
 void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
@@ -3241,98 +3187,6 @@ void update()
         predict(tmp_imu_buf.front());
 }
 
-//todo 这里单独写成一个线程 process_lio
-void process_lio()
-{
-	while (true) {
-		std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>> measurements;
-        std::unique_lock<std::mutex> lk(mBuf);
-        con.wait(lk, [&]
-                 {
-            return (measurements = getMeasurements()).size() != 0;
-                 });
-        lk.unlock();
-        //vins中和restart有关 这里用不着 需要确认这个锁的控制范围
-//        m_estimator.lock();
-		for (auto &measurement : measurements)
-        {
-            auto lidar_info = measurement.second;
-            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
-            for (auto &imu_msg : measurement.first)
-            {
-                double t = imu_msg->header.stamp.toSec();
-                double lidar_info_t = lidar_info.odom_msg->header.stamp.toSec();
-                if (t <= odom_t)
-                {
-                  //todo vins中有update()会更新current_time
-                    if (current_time < 0)
-                        current_time = t;
-                    double dt = t - current_time;
-                    ROS_ASSERT(dt >= 0);
-                    current_time = t;
-                    dx = imu_msg->linear_acceleration.x;
-                    dy = imu_msg->linear_acceleration.y;
-                    dz = imu_msg->linear_acceleration.z;
-                    rx = imu_msg->angular_velocity.x;
-                    ry = imu_msg->angular_velocity.y;
-                    rz = imu_msg->angular_velocity.z;
-                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
-
-                }
-                else
-                {
-                    double dt_1 = odom_t - current_time;
-                    double dt_2 = t - lidar_info_t;
-                    current_time = lidar_info_t;
-                    ROS_ASSERT(dt_1 >= 0);
-                    ROS_ASSERT(dt_2 >= 0);
-                    ROS_ASSERT(dt_1 + dt_2 > 0);
-                    double w1 = dt_2 / (dt_1 + dt_2);
-                    double w2 = dt_1 / (dt_1 + dt_2);
-                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
-                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
-                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
-                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
-                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
-                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
-                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
-                }
-            }
-
-            TicToc t_s;
-            //todo 目前改到这里 要传参数吗？
-            processLidarInfo(lidar_info, lidar_info.odom_msg->header);
-
-            double whole_t = t_s.toc();
-//            printStatistics(estimator, whole_t);
-//            std_msgs::Header header = img_msg->header;
-//            header.frame_id = "world";
-//
-//            pubOdometry(estimator, header);
-//            pubKeyPoses(estimator, header);
-//            pubCameraPose(estimator, header);
-//            pubPointCloud(estimator, header);
-//            pubTF(estimator, header);
-//            pubKeyframe(estimator);
-//            if (relo_msg != NULL)
-//                pubRelocalization(estimator);
-            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
-        }
-//        m_estimator.unlock();
-        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
-        mBuf.lock();
-        m_state.lock();
-//        if (solver_flag == NON_LINEAR)
-//            update();
-        m_state.unlock();
-        mBuf.unlock();
-	}
-} // laserOdometryHandler
-
-
-
 //todo 根据需求修改
 void SurfHandler(const sensor_msgs::PointCloud2ConstPtr &_laserSurf)
 {
@@ -3453,7 +3307,7 @@ void imuHandler(const sensor_msgs::ImuConstPtr &imu_msg)
     con.notify_one();
 
     {
-        std::lock_guard<std::mutex> lg(m_state);
+//        std::lock_guard<std::mutex> lg(m_state);
         //vins在这里做的imu积分 lio-mapping没在这里做
 //        predict(imu_msg);
 
@@ -3464,12 +3318,165 @@ void imuHandler(const sensor_msgs::ImuConstPtr &imu_msg)
     }
 }
 
+//对齐数据 改成自定义的数据结构 包含点云、激光里程计、预留事件相机帧
+std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>>
+getMeasurements()
+{
+    std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>> measurements;
+
+    while (true)
+    {
+        if (imu_buf.empty() || odometryBuf.empty())
+            return measurements;
+
+        if (!(imu_buf.back()->header.stamp.toSec() > odometryBuf.front()->header.stamp.toSec()))
+        {
+            //ROS_WARN("wait for imu, only should happen at the beginning");
+            return measurements;
+        }
+
+        if (!(imu_buf.front()->header.stamp.toSec() < odometryBuf.front()->header.stamp.toSec()))
+        {
+            ROS_WARN("throw odom, only should happen at the beginning");
+            if(odometryBuf.size() != 0)
+            	odometryBuf.pop();
+            if(surfBuf.size() != 0)
+            	surfBuf.pop();
+            if(edgeBuf.size() != 0)
+            	edgeBuf.pop();
+            continue;
+        }
+
+        nav_msgs::Odometry::ConstPtr odom_msg;
+        if(odometryBuf.size() != 0) {
+        	odom_msg = odometryBuf.front();
+            odometryBuf.pop();
+        }
+        sensor_msgs::PointCloud2ConstPtr surf_msg;
+        if(surfBuf.size() != 0) {
+        	surf_msg = surfBuf.front();
+            surfBuf.pop();
+        }
+        sensor_msgs::PointCloud2ConstPtr edge_msg;
+        if(edgeBuf.size() != 0) {
+        	edge_msg = edgeBuf.front();
+            edgeBuf.pop();
+        }
+		LidarInfo lidar_info;
+        lidar_info.laser_odometry_ = odom_msg;
+        lidar_info.surf_cloud_ = surf_msg;
+        lidar_info.edge_cloud_ = edge_msg;
+
+        std::vector<sensor_msgs::ImuConstPtr> IMUs;
+        while (imu_buf.front()->header.stamp.toSec() < odom_msg->header.stamp.toSec())
+        {
+            IMUs.emplace_back(imu_buf.front());
+            imu_buf.pop();
+        }
+        IMUs.emplace_back(imu_buf.front());
+        if (IMUs.empty())
+            ROS_WARN("no imu between two image");
+
+        measurements.emplace_back(IMUs, lidar_info);
+    }
+    return measurements;
+}
+
+void process_lio()
+{
+	while (true) {
+		std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, LidarInfo>> measurements;
+        std::unique_lock<std::mutex> lk(mBuf);
+        con.wait(lk, [&]
+                 {
+            return (measurements = getMeasurements()).size() != 0;
+                 });
+        lk.unlock();
+        //vins中和restart有关 这里用不着 需要确认这个锁的控制范围
+//        m_estimator.lock();
+		for (auto &measurement : measurements)
+        {
+            auto lidar_info = measurement.second;
+            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
+            for (auto &imu_msg : measurement.first)
+            {
+                double t = imu_msg->header.stamp.toSec();
+                double lidar_info_t = lidar_info.odom_msg->header.stamp.toSec();
+                if (t <= odom_t)
+                {
+                  //todo vins中有update()会更新current_time
+                    if (current_time < 0)
+                        current_time = t;
+                    double dt = t - current_time;
+                    ROS_ASSERT(dt >= 0);
+                    current_time = t;
+                    dx = imu_msg->linear_acceleration.x;
+                    dy = imu_msg->linear_acceleration.y;
+                    dz = imu_msg->linear_acceleration.z;
+                    rx = imu_msg->angular_velocity.x;
+                    ry = imu_msg->angular_velocity.y;
+                    rz = imu_msg->angular_velocity.z;
+                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
+
+                }
+                else
+                {
+                    double dt_1 = odom_t - current_time;
+                    double dt_2 = t - lidar_info_t;
+                    current_time = lidar_info_t;
+                    ROS_ASSERT(dt_1 >= 0);
+                    ROS_ASSERT(dt_2 >= 0);
+                    ROS_ASSERT(dt_1 + dt_2 > 0);
+                    double w1 = dt_2 / (dt_1 + dt_2);
+                    double w2 = dt_1 / (dt_1 + dt_2);
+                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
+                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
+                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
+                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
+                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
+                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
+                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
+                }
+            }
+
+            TicToc t_s;
+            //todo 目前改到这里 要传参数吗？
+            processLidarInfo(lidar_info, lidar_info.odom_msg->header);
+
+            double whole_t = t_s.toc();
+//            printStatistics(estimator, whole_t);
+//            std_msgs::Header header = img_msg->header;
+//            header.frame_id = "world";
+//
+//            pubOdometry(estimator, header);
+//            pubKeyPoses(estimator, header);
+//            pubCameraPose(estimator, header);
+//            pubPointCloud(estimator, header);
+//            pubTF(estimator, header);
+//            pubKeyframe(estimator);
+//            if (relo_msg != NULL)
+//                pubRelocalization(estimator);
+            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
+        }
+//        m_estimator.unlock();
+        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
+        mBuf.lock();
+        m_state.lock();
+//        if (solver_flag == NON_LINEAR)
+//            update();
+        m_state.unlock();
+        mBuf.unlock();
+	}
+} // process_lio
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "laserPGO");
 	ros::NodeHandle nh;
 
-    //全局变量初始化
+    //todo 全局变量初始化
     down_size_filter_corner_.setLeafSize(corner_filter_size, corner_filter_size, corner_filter_size);
   	down_size_filter_surf_.setLeafSize(surf_filter_size, surf_filter_size, surf_filter_size);
   	down_size_filter_map_.setLeafSize(map_filter_size, map_filter_size, map_filter_size);
