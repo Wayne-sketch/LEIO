@@ -94,6 +94,14 @@ PointCloudPtr laser_cloud_surf_last_;     ///< last surface points cloud
 PointCloudPtr full_cloud_;      ///< last full resolution cloud
 
 //lio-mapping中mapping部分用到的
+float scan_period_;
+float time_factor_;
+long map_frame_count_;
+const int num_stack_frames_ = 1;
+long frame_count_ = num_stack_frames_ - 1;        ///< number of processed frames
+const int num_map_frames_;
+int extrinsic_stage_ = 1;
+
 Transform transform_sum_;
 Transform transform_tobe_mapped_;
 Transform transform_bef_mapped_;
@@ -111,6 +119,11 @@ bool new_laser_cloud_corner_last_;  ///< flag if a new last corner cloud has bee
 bool new_laser_cloud_surf_last_;    ///< flag if a new last surface cloud has been received
 bool new_laser_full_cloud_;     ///< flag if a new full resolution cloud has been received
 bool new_laser_odometry_;         ///< flag if a new laser odometry has been received
+
+bool is_ros_setup_ = false;
+bool compact_data_ = false;
+bool imu_inited_ = false;
+
 //end lio-mapping mapping
 
 //滑窗
@@ -202,12 +215,16 @@ Eigen::Quaterniond extQRPY = Eigen::Quaterniond(extRPY).inverse();
 Matrix3d ric = extRot.transpose();
 Vector3d tic = -ric * extTrans;
 Transform transform_lb_{Eigen::Quaterniond(extRPY), extTrans}; ///< Base to laser transform
+Eigen::Matrix3d R_WI_; ///< R_WI is the rotation from the inertial frame into Lidar's world frame
+Eigen::Quaterniond Q_WI_; ///< Q_WI is the rotation from the inertial frame into Lidar's world frame
 
 //todo 变量命名vins替换成lio-mapping
 //getMeasurements版本用这个
 std::condition_variable con;
 const int window_size = 10;
 const int opt_window_size = 5;
+int init_window_factor = 3;
+int estimate_extrinsic = 2;
 //imuHandler使用
 double last_imu_t = 0;
 bool init_imu = 1;
@@ -280,6 +297,19 @@ class LidarInfo
 		nav_msgs::Odometry laser_odometry_;
 }
 
+struct LaserTransform {
+  LaserTransform() {};
+  LaserTransform(double laser_time, Transform laser_transform) : time{laser_time}, transform{laser_transform} {};
+
+  double time;
+  Transform transform;
+  shared_ptr<IntegrationBase> pre_integration;
+
+ public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+};
+
 struct StampedTransform {
   double time;
   Transform transform;
@@ -291,6 +321,8 @@ enum EstimatorStageFlag {
   INITED,
 };
 EstimatorStageFlag stage_flag_ = NOT_INITED;
+  bool first_imu_ = false;
+  double initial_time_ = -1;
 
 //todo vins换lio-mapping
 SolverFlag solver_flag = INITIAL;
@@ -1649,7 +1681,7 @@ void Estimator::DoubleToVector() {
 }
 
 //todo 优化核心部分 ceres实现滑窗优化
-void optimization()
+void SolveOptimization()
 {
     if (cir_buf_count_ < window_size && imu_factor) {
     	LOG(ERROR) << "enter optimization before enough count: " << cir_buf_count_ << " < "
@@ -2130,67 +2162,93 @@ void solveOdometry()
 }
 
 //todo 滑窗
-void slideWindow()
-{
-    TicToc t_margin;
-    if (1) //margin_old
-    {
-        double t_0 = Headers[0].stamp.toSec();
-        back_R0 = Rs[0];
-        back_P0 = Ps[0];
-        if (frame_count == window_size)
-        {
-            for (int i = 0; i < window_size; i++)
-            {
-                Rs[i].swap(Rs[i + 1]);
+void SlideWindow() { // NOTE: this function is only for the states and the local map
 
-                std::swap(pre_integrations[i], pre_integrations[i + 1]);
+  {
+    if (init_local_map_) {
+      int pivot_idx = window_size - opt_window_size;
 
-                dt_buf[i].swap(dt_buf[i + 1]);
-                linear_acceleration_buf[i].swap(linear_acceleration_buf[i + 1]);
-                angular_velocity_buf[i].swap(angular_velocity_buf[i + 1]);
+      Twist<double> transform_lb = transform_lb_.cast<double>();
 
-                Headers[i] = Headers[i + 1];
-                Ps[i].swap(Ps[i + 1]);
-                Vs[i].swap(Vs[i + 1]);
-                Bas[i].swap(Bas[i + 1]);
-                Bgs[i].swap(Bgs[i + 1]);
-            }
-            Headers[window_size] = Headers[window_size - 1];
-            Ps[window_size] = Ps[window_size - 1];
-            Vs[window_size] = Vs[window_size - 1];
-            Rs[window_size] = Rs[window_size - 1];
-            Bas[window_size] = Bas[window_size - 1];
-            Bgs[window_size] = Bgs[window_size - 1];
+      Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
+      Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
 
-            delete pre_integrations[window_size];
-            pre_integrations[window_size] = new IntegrationBase{acc_0, gyr_0, Bas[window_size], Bgs[window_size]};
+      Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+      Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 
-            dt_buf[window_size].clear();
-            linear_acceleration_buf[window_size].clear();
-            angular_velocity_buf[window_size].clear();
+      Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
 
-            if (true || solver_flag == INITIAL)
-            {
-                map<double, LidarFrame>::iterator it_0;
-                it_0 = all_lidar_frame.find(t_0);
-                delete it_0->second.pre_integration;
-                it_0->second.pre_integration = nullptr;
+      PointCloudPtr transformed_cloud_surf_ptr(new PointCloud);
+      PointCloudPtr transformed_cloud_corner_ptr(new PointCloud);
+      PointCloud filtered_surf_points;
+      PointCloud filtered_corner_points;
 
-                for (map<double, LidarFrame>::iterator it = all_lidar_frame.begin(); it != it_0; ++it)
-                {
-                    if (it->second.pre_integration)
-                        delete it->second.pre_integration;
-                    it->second.pre_integration = NULL;
-                }
+      int i = pivot_idx + 1; // the index of the next pivot
+      Eigen::Vector3d Ps_i = Ps_[i];
+      Eigen::Matrix3d Rs_i = Rs_[i];
 
-                all_lidar_frame.erase(all_lidar_frame.begin(), it_0);
-                all_lidar_frame.erase(t_0);
+      Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
+      Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
 
-            }
-//            slideWindowOld(); //vins中和视觉特征管理有关 不要了
-        }
+      Twist<double> transform_li = Twist<double>(rot_li, pos_li);
+      Eigen::Affine3f transform_i_pivot = (transform_li.inverse() * transform_pivot).cast<float>().transform();
+      pcl::ExtractIndices<PointT> extract;
+
+      pcl::transformPointCloud(*(surf_stack_[pivot_idx]), *transformed_cloud_surf_ptr, transform_i_pivot);
+      pcl::PointIndices::Ptr inliers_surf(new pcl::PointIndices());
+
+      for (int i = 0; i < size_surf_stack_[0]; ++i) {
+        inliers_surf->indices.push_back(i);
+      }
+      extract.setInputCloud(transformed_cloud_surf_ptr);
+      extract.setIndices(inliers_surf);
+      extract.setNegative(true);
+      extract.filter(filtered_surf_points);
+
+      filtered_surf_points += *(surf_stack_[i]);
+
+      *(surf_stack_[i]) = filtered_surf_points;
+
+#ifdef USE_CORNER
+      pcl::transformPointCloud(*(corner_stack_[pivot_idx]), *transformed_cloud_corner_ptr, transform_i_pivot);
+      pcl::PointIndices::Ptr inliers_corner(new pcl::PointIndices());
+
+      for (int i = 0; i < size_corner_stack_[0]; ++i) {
+        inliers_corner->indices.push_back(i);
+      }
+      extract.setInputCloud(transformed_cloud_corner_ptr);
+      extract.setIndices(inliers_corner);
+      extract.setNegative(true);
+      extract.filter(filtered_corner_points);
+
+      filtered_corner_points += *(corner_stack_[i]);
+
+      *(corner_stack_[i]) = filtered_corner_points;
+#endif
     }
+
+  }
+
+  dt_buf_.push(vector<double>());
+  linear_acceleration_buf_.push(vector<Vector3d>());
+  angular_velocity_buf_.push(vector<Vector3d>());
+
+//  Headers_.push(Headers_[cir_buf_count_]);
+  Ps_.push(Ps_[cir_buf_count_]);
+  Vs_.push(Vs_[cir_buf_count_]);
+  Rs_.push(Rs_[cir_buf_count_]);
+  Bas_.push(Bas_[cir_buf_count_]);
+  Bgs_.push(Bgs_[cir_buf_count_]);
+
+//  pre_integrations_.push(std::make_shared<IntegrationBase>(IntegrationBase(acc_last_, gyr_last_,
+//                                                                           Bas_[cir_buf_count_],
+//                                                                           Bgs_[cir_buf_count_],
+//                                                                           estimator_config_.pim_config)));
+
+//  all_laser_transforms_.push(all_laser_transforms_[cir_buf_count_]);
+
+// TODO: slide new lidar points
+
 }
 
 //todo 可能会导致失败
@@ -2283,6 +2341,95 @@ void clearState()
     drift_correct_t = Vector3d::Zero();
 }
 
+bool RunInitialization() {
+
+  // NOTE: check IMU observibility, adapted from VINS-mono
+  {
+    PairTimeLaserTransform laser_trans_i, laser_trans_j;
+    Vector3d sum_g;
+
+    for (size_t i = 0; i < window_size;
+         ++i) {
+      laser_trans_j = all_laser_transforms_[i + 1];
+
+      double dt = laser_trans_j.second.pre_integration->sum_dt_;
+      Vector3d tmp_g = laser_trans_j.second.pre_integration->delta_v_ / dt;
+      sum_g += tmp_g;
+    }
+
+    Vector3d aver_g;
+    aver_g = sum_g * 1.0 / (window_size);
+    double var = 0;
+
+    for (size_t i = 0; i < window_size;
+         ++i) {
+      laser_trans_j = all_laser_transforms_[i + 1];
+      double dt = laser_trans_j.second.pre_integration->sum_dt_;
+      Vector3d tmp_g = laser_trans_j.second.pre_integration->delta_v_ / dt;
+      var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);
+    }
+
+    var = sqrt(var / (estimator_config_.window_size));
+
+    DLOG(INFO) << "IMU variation: " << var;
+
+    if (var < 0.25) {
+      ROS_INFO("IMU excitation not enough!");
+      return false;
+    }
+  }
+
+  Eigen::Vector3d g_vec_in_laser;
+  //todo R_WI_ LIO版本的初始化要确认是否正确
+  bool init_result
+      = ImuInitializer::Initialization(all_laser_transforms_, Vs_, Bas_, Bgs_, g_vec_in_laser, transform_lb_, R_WI_);
+//  init_result = false;
+
+//  Q_WI_ = R_WI_;
+//  g_vec_ = R_WI_ * Eigen::Vector3d(0.0, 0.0, -1.0) * g_norm_;
+//  g_vec_ = Eigen::Vector3d(0.0, 0.0, -1.0) * g_norm_;
+
+  // TODO: update states Ps_
+  for (size_t i = 0; i < window_size + 1;
+       ++i) {
+    const Transform &trans_li = all_laser_transforms_[i].second.transform;
+    Transform trans_bi = trans_li * transform_lb_;
+    Ps_[i] = trans_bi.pos.template cast<double>();
+    Rs_[i] = trans_bi.rot.normalized().toRotationMatrix().template cast<double>();
+  }
+
+  Matrix3d R0 = R_WI_.transpose();
+
+  double yaw = R2ypr(R0 * Rs_[0]).x();
+  R0 = (ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0).eval();
+
+  R_WI_ = R0.transpose();
+  Q_WI_ = R_WI_;
+
+  g_vec_ = R0 * g_vec_in_laser;
+
+  for (int i = 0; i <= cir_buf_count_; i++) {
+    pre_integrations_[i]->Repropagate(Bas_[i], Bgs_[i]);
+  }
+
+  Matrix3d rot_diff = R0;
+  for (int i = 0; i <= cir_buf_count_; i++) {
+    Ps_[i] = (rot_diff * Ps_[i]).eval();
+    Rs_[i] = (rot_diff * Rs_[i]).eval();
+    Vs_[i] = (rot_diff * Vs_[i]).eval();
+  }
+
+  DLOG(WARNING) << "refined gravity:  " << g_vec_.transpose();
+
+  if (!init_result) {
+    DLOG(WARNING) << "Imu initialization failed!";
+    return false;
+  } else {
+    DLOG(WARNING) << "Imu initialization successful!";
+    return true;
+  }
+}
+
 //处理完lidar_info消息后做LIO
 void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &header) {
 
@@ -2291,7 +2438,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   ++laser_odom_recv_count_;
 
   if (stage_flag_ != INITED
-      && laser_odom_recv_count_ % estimator_config_.init_window_factor != 0) { /// better for initialization
+      && laser_odom_recv_count_ % init_window_factor != 0) { /// better for initialization
     return;
   }
 
@@ -2327,8 +2474,9 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   opt_transforms_.push(laser_transform.transform);
   opt_valid_idx_.push(laser_cloud_valid_idx_);
 
+  //todo 这里往滑窗里放点云
   // TODO: avoid memory allocation?
-  if (stage_flag_ != INITED || (!estimator_config_.enable_deskew && !estimator_config_.cutoff_deskew)) {
+  if (stage_flag_ != INITED || (!enable_deskew && !cutoff_deskew)) {
     surf_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_surf_stack_downsampled_));
     size_surf_stack_.push(laser_cloud_surf_stack_downsampled_->size());
 
@@ -2341,10 +2489,11 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   opt_surf_stack_.push(surf_stack_.last());
   opt_corner_stack_.push(corner_stack_.last());
 
+  //todo ?
   opt_matP_.push(matP_.cast<double>());
   ///< optimization buffers
 
-  if (estimator_config_.run_optimization) {
+  if (run_optimization) {
     switch (stage_flag_) {
       case NOT_INITED: {
 
@@ -2359,13 +2508,13 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
         }
 
         bool init_result = false;
-        if (cir_buf_count_ == estimator_config_.window_size) {
+        if (cir_buf_count_ == window_size) {
           tic_toc_.Tic();
 
           if (!imu_factor) {
             init_result = true;
             // TODO: update states Ps_
-            for (size_t i = 0; i < estimator_config_.window_size + 1;
+            for (size_t i = 0; i < window_size + 1;
                  ++i) {
               const Transform &trans_li = all_laser_transforms_[i].second.transform;
               Transform trans_bi = trans_li * transform_lb_;
@@ -2374,18 +2523,18 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
             }
           } else {
 
-            if (extrinsic_stage_ == 2) {
-              // TODO: move before initialization
-              bool extrinsic_result = ImuInitializer::EstimateExtrinsicRotation(all_laser_transforms_, transform_lb_);
-              LOG(INFO) << ">>>>>>> extrinsic calibration"
-                        << (extrinsic_result ? " successful"
-                                             : " failed")
-                        << " <<<<<<<";
-              if (extrinsic_result) {
-                extrinsic_stage_ = 1;
-                DLOG(INFO) << "change extrinsic stage to 1";
-              }
-            }
+//            if (extrinsic_stage_ == 2) {
+//              // TODO: move before initialization
+//              bool extrinsic_result = ImuInitializer::EstimateExtrinsicRotation(all_laser_transforms_, transform_lb_);
+//              LOG(INFO) << ">>>>>>> extrinsic calibration"
+//                        << (extrinsic_result ? " successful"
+//                                             : " failed")
+//                        << " <<<<<<<";
+//              if (extrinsic_result) {
+//                extrinsic_stage_ = 1;
+//                DLOG(INFO) << "change extrinsic stage to 1";
+//              }
+//            }
 
             if (extrinsic_stage_ != 2 && (header.stamp.toSec() - initial_time_) > 0.1) {
               DLOG(INFO) << "EXTRINSIC STAGE: " << extrinsic_stage_;
@@ -2398,25 +2547,26 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 
           if (init_result) {
             stage_flag_ = INITED;
-            SetInitFlag(true);
+//            SetInitFlag(true);
+			imu_inited_ = set_init;
 
             Q_WI_ = R_WI_;
 //            wi_trans_.setRotation(tf::Quaternion{Q_WI_.x(), Q_WI_.y(), Q_WI_.z(), Q_WI_.w()});
 
             ROS_WARN_STREAM(">>>>>>> IMU initialized <<<<<<<");
 
-            if (estimator_config_.enable_deskew || estimator_config_.cutoff_deskew) {
-              ros::ServiceClient client = nh_.serviceClient<std_srvs::SetBool>("/enable_odom");
-              std_srvs::SetBool srv;
-              srv.request.data = 0;
-              if (client.call(srv)) {
-                DLOG(INFO) << "TURN OFF THE ORIGINAL LASER ODOM";
-              } else {
-                LOG(FATAL) << "FAILED TO CALL TURNING OFF THE ORIGINAL LASER ODOM";
-              }
-            }
+//            if (enable_deskew || cutoff_deskew) {
+//              ros::ServiceClient client = nh_.serviceClient<std_srvs::SetBool>("/enable_odom");
+//              std_srvs::SetBool srv;
+//              srv.request.data = 0;
+//              if (client.call(srv)) {
+//                DLOG(INFO) << "TURN OFF THE ORIGINAL LASER ODOM";
+//              } else {
+//                LOG(FATAL) << "FAILED TO CALL TURNING OFF THE ORIGINAL LASER ODOM";
+//              }
+//            }
 
-            for (size_t i = 0; i < estimator_config_.window_size + 1;
+            for (size_t i = 0; i < window_size + 1;
                  ++i) {
               Twist<double> transform_lb = transform_lb_.cast<double>();
 
@@ -2433,14 +2583,14 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 
             SlideWindow();
 
-            for (size_t i = 0; i < estimator_config_.window_size + 1;
+            for (size_t i = 0; i < window_size + 1;
                  ++i) {
               const Transform &trans_li = all_laser_transforms_[i].second.transform;
               Transform trans_bi = trans_li * transform_lb_;
               DLOG(INFO) << "TEST " << i << ": " << trans_bi.pos.transpose();
             }
 
-            for (size_t i = 0; i < estimator_config_.window_size + 1;
+            for (size_t i = 0; i < window_size + 1;
                  ++i) {
               Twist<double> transform_lb = transform_lb_.cast<double>();
 
@@ -2475,182 +2625,84 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
         break;
       }
       case INITED: {
+        if (opt_point_coeff_map_.size() == opt_window_size + 1) {
 
-        // TODO
-
-        // WARNING
-
-        if (opt_point_coeff_map_.size() == estimator_config_.opt_window_size + 1) {
-
-          if (estimator_config_.enable_deskew || estimator_config_.cutoff_deskew) {
-            TicToc t_deskew;
-            t_deskew.Tic();
-            // TODO: the coefficients to be parameterized
-            DLOG(INFO) << ">>>>>>> de-skew points <<<<<<<";
-            LOG_ASSERT(imu_stampedtransforms.size() > 0) << "no imu data";
-            double time_e = imu_stampedtransforms.last().time;
-            Transform transform_e = imu_stampedtransforms.last().transform;
-            double time_s = imu_stampedtransforms.last().time;
-            Transform transform_s = imu_stampedtransforms.last().transform;
-            for (int i = int(imu_stampedtransforms.size()) - 1; i >= 0; --i) {
-              time_s = imu_stampedtransforms[i].time;
-              transform_s = imu_stampedtransforms[i].transform;
-              if (time_e - imu_stampedtransforms[i].time >= 0.1) {
-                break;
-              }
-            }
-//            Eigen::Vector3d body_velocity, vel1, vel2;
-//            vel1 = Rs_[estimator_config_.window_size - 1].transpose() * Vs_[estimator_config_.window_size - 1];
-//            vel2 = Rs_[estimator_config_.window_size].transpose() * Vs_[estimator_config_.window_size];
-//            body_velocity = (vel1 + vel2) / 2;
-
-            Transform transform_body_es = transform_e.inverse() * transform_s;
-//            transform_body_es.pos = -0.1 * body_velocity.cast<float>();
-            {
-              float s = 0.1 / (time_e - time_s);
-              Eigen::Quaternionf q_id, q_s, q_e, q_half;
-              q_e = transform_body_es.rot;
-              q_id.setIdentity();
-              q_s = q_id.slerp(s, q_e);
-              transform_body_es.rot = q_s;
-              transform_body_es.pos = s * transform_body_es.pos;
-            }
-
-            transform_es_ = transform_lb_ * transform_body_es * transform_lb_.inverse();
-            DLOG(INFO) << "time diff: " << time_e - time_s;
-            DLOG(INFO) << "transform diff: " << transform_es_;
-            DLOG(INFO) << "transform diff norm: " << transform_es_.pos.norm();
-
-            if (!estimator_config_.cutoff_deskew) {
-              TransformToEnd(laser_cloud_surf_last_, transform_es_, 10);
-
-              TransformToEnd(laser_cloud_corner_last_, transform_es_, 10);
-#ifdef USE_CORNER
-              TransformToEnd(corner_stack_.last(), transform_es_, 10);
-#endif
-            } else {
-              DLOG(INFO) << "cutoff_deskew";
-            }
-
-            laser_cloud_surf_stack_downsampled_->clear();
-            down_size_filter_surf_.setInputCloud(laser_cloud_surf_last_);
-            down_size_filter_surf_.filter(*laser_cloud_surf_stack_downsampled_);
-            size_t laser_cloud_surf_stack_ds_size = laser_cloud_surf_stack_downsampled_->points.size();
-
-            // down sample feature stack clouds
-            laser_cloud_corner_stack_downsampled_->clear();
-            down_size_filter_corner_.setInputCloud(laser_cloud_corner_last_);
-            down_size_filter_corner_.filter(*laser_cloud_corner_stack_downsampled_);
-            size_t laser_cloud_corner_stack_ds_size = laser_cloud_corner_stack_downsampled_->points.size();
-
-            surf_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_surf_stack_downsampled_));
-            size_surf_stack_.push(laser_cloud_surf_stack_downsampled_->size());
-
-            corner_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_corner_stack_downsampled_));
-            size_corner_stack_.push(laser_cloud_corner_stack_downsampled_->size());
-
-            ROS_DEBUG_STREAM("deskew time: " << t_deskew.Toc());
-
-            DLOG(INFO) << "deskew time: " << t_deskew.Toc();
-          }
-
-          DLOG(INFO) << ">>>>>>> solving optimization <<<<<<<";
-          SolveOptimization();
-
-          if (!opt_point_coeff_mask_.first()) {
-            UpdateMapDatabase(opt_corner_stack_.first(),
-                              opt_surf_stack_.first(),
-                              opt_valid_idx_.first(),
-                              opt_transforms_.first(),
-                              opt_cube_centers_.first());
-
-            DLOG(INFO) << "all_laser_transforms_: " << all_laser_transforms_[estimator_config_.window_size
-                - estimator_config_.opt_window_size].second.transform;
-            DLOG(INFO) << "opt_transforms_: " << opt_transforms_.first();
-
-          }
-
-        } else {
-          LOG(ERROR) << "opt_point_coeff_map_.size(): " << opt_point_coeff_map_.size()
-                     << " != estimator_config_.opt_window_size + 1: " << estimator_config_.opt_window_size + 1;
-        }
-
-        PublishResults();
+//        PublishResults();
 
         SlideWindow();
 
-        {
-          int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
-          local_odom_.header.stamp = Headers_[pivot_idx + 1].stamp;
-          local_odom_.header.seq += 1;
-          Twist<double> transform_lb = transform_lb_.cast<double>();
-          Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
-          Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
-          Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
-          Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
-          Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
-          local_odom_.pose.pose.orientation.x = transform_pivot.rot.x();
-          local_odom_.pose.pose.orientation.y = transform_pivot.rot.y();
-          local_odom_.pose.pose.orientation.z = transform_pivot.rot.z();
-          local_odom_.pose.pose.orientation.w = transform_pivot.rot.w();
-          local_odom_.pose.pose.position.x = transform_pivot.pos.x();
-          local_odom_.pose.pose.position.y = transform_pivot.pos.y();
-          local_odom_.pose.pose.position.z = transform_pivot.pos.z();
-          pub_local_odom_.publish(local_odom_);
-
-          laser_odom_.header.stamp = header.stamp;
-          laser_odom_.header.seq += 1;
-          Eigen::Vector3d Ps_last = Ps_.last();
-          Eigen::Matrix3d Rs_last = Rs_.last();
-          Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
-          Eigen::Vector3d pos_last = Ps_last - rot_last * transform_lb.pos;
-          Twist<double> transform_last = Twist<double>(rot_last, pos_last);
-          laser_odom_.pose.pose.orientation.x = transform_last.rot.x();
-          laser_odom_.pose.pose.orientation.y = transform_last.rot.y();
-          laser_odom_.pose.pose.orientation.z = transform_last.rot.z();
-          laser_odom_.pose.pose.orientation.w = transform_last.rot.w();
-          laser_odom_.pose.pose.position.x = transform_last.pos.x();
-          laser_odom_.pose.pose.position.y = transform_last.pos.y();
-          laser_odom_.pose.pose.position.z = transform_last.pos.z();
-          //滑窗内最新帧位姿
-          pub_laser_odom_.publish(laser_odom_);
-
-          //lidar里程计路径
-          geometry_msgs::PoseStamped pose_stamped;
-          pose_stamped.header.stamp = laser_odom_.header.stamp;
-          pose_stamped.header.frame_id = "world";
-          pose_stamped.pose.position.x = laser_odom_.pose.pose.position.x;
-          pose_stamped.pose.position.y = laser_odom_.pose.pose.position.y;
-          pose_stamped.pose.position.z = laser_odom_.pose.pose.position.z;
-          pose_stamped.pose.orientation.x = laser_odom_.pose.pose.orientation.x;
-          pose_stamped.pose.orientation.y = laser_odom_.pose.pose.orientation.y;
-          pose_stamped.pose.orientation.z = laser_odom_.pose.pose.orientation.z;
-          pose_stamped.pose.orientation.w = laser_odom_.pose.pose.orientation.w;
-          global_path.poses.push_back(pose_stamped);
-          pub_path.publish(global_path);
-
-          //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
-          std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/result/lio-mapping/result_0018.txt", std::ios::app);
-          pose1.setf(std::ios::scientific, std::ios::floatfield);
-          //kitti数据集转换tum格式的数据是18位
-          pose1.precision(9);
-          //第一个激光帧时间 static变量 只赋值一次
-          static double timeStart = laser_odom_.header.stamp.toSec();
-          auto T1 =ros::Time().fromSec(timeStart) ;
-
-          pose1<< laser_odom_.header.stamp -T1<< " "
-              << -laser_odom_.pose.pose.position.x << " "
-              << -laser_odom_.pose.pose.position.y << " "
-              << -laser_odom_.pose.pose.position.z << " "
-              << laser_odom_.pose.pose.orientation.x << " "
-              << laser_odom_.pose.pose.orientation.y << " "
-              << laser_odom_.pose.pose.orientation.z << " "
-              << laser_odom_.pose.pose.orientation.w << std::endl;
-          pose1.close();
-        }
+//        {
+//          int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
+//          local_odom_.header.stamp = Headers_[pivot_idx + 1].stamp;
+//          local_odom_.header.seq += 1;
+//          Twist<double> transform_lb = transform_lb_.cast<double>();
+//          Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
+//          Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
+//          Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+//          Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
+//          Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
+//          local_odom_.pose.pose.orientation.x = transform_pivot.rot.x();
+//          local_odom_.pose.pose.orientation.y = transform_pivot.rot.y();
+//          local_odom_.pose.pose.orientation.z = transform_pivot.rot.z();
+//          local_odom_.pose.pose.orientation.w = transform_pivot.rot.w();
+//          local_odom_.pose.pose.position.x = transform_pivot.pos.x();
+//          local_odom_.pose.pose.position.y = transform_pivot.pos.y();
+//          local_odom_.pose.pose.position.z = transform_pivot.pos.z();
+//          pub_local_odom_.publish(local_odom_);
+//
+//          laser_odom_.header.stamp = header.stamp;
+//          laser_odom_.header.seq += 1;
+//          Eigen::Vector3d Ps_last = Ps_.last();
+//          Eigen::Matrix3d Rs_last = Rs_.last();
+//          Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
+//          Eigen::Vector3d pos_last = Ps_last - rot_last * transform_lb.pos;
+//          Twist<double> transform_last = Twist<double>(rot_last, pos_last);
+//          laser_odom_.pose.pose.orientation.x = transform_last.rot.x();
+//          laser_odom_.pose.pose.orientation.y = transform_last.rot.y();
+//          laser_odom_.pose.pose.orientation.z = transform_last.rot.z();
+//          laser_odom_.pose.pose.orientation.w = transform_last.rot.w();
+//          laser_odom_.pose.pose.position.x = transform_last.pos.x();
+//          laser_odom_.pose.pose.position.y = transform_last.pos.y();
+//          laser_odom_.pose.pose.position.z = transform_last.pos.z();
+//          //滑窗内最新帧位姿
+//          pub_laser_odom_.publish(laser_odom_);
+//
+//          //lidar里程计路径
+//          geometry_msgs::PoseStamped pose_stamped;
+//          pose_stamped.header.stamp = laser_odom_.header.stamp;
+//          pose_stamped.header.frame_id = "world";
+//          pose_stamped.pose.position.x = laser_odom_.pose.pose.position.x;
+//          pose_stamped.pose.position.y = laser_odom_.pose.pose.position.y;
+//          pose_stamped.pose.position.z = laser_odom_.pose.pose.position.z;
+//          pose_stamped.pose.orientation.x = laser_odom_.pose.pose.orientation.x;
+//          pose_stamped.pose.orientation.y = laser_odom_.pose.pose.orientation.y;
+//          pose_stamped.pose.orientation.z = laser_odom_.pose.pose.orientation.z;
+//          pose_stamped.pose.orientation.w = laser_odom_.pose.pose.orientation.w;
+//          global_path.poses.push_back(pose_stamped);
+//          pub_path.publish(global_path);
+//
+//          //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
+//          std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/result/lio-mapping/result_0018.txt", std::ios::app);
+//          pose1.setf(std::ios::scientific, std::ios::floatfield);
+//          //kitti数据集转换tum格式的数据是18位
+//          pose1.precision(9);
+//          //第一个激光帧时间 static变量 只赋值一次
+//          static double timeStart = laser_odom_.header.stamp.toSec();
+//          auto T1 =ros::Time().fromSec(timeStart) ;
+//
+//          pose1<< laser_odom_.header.stamp -T1<< " "
+//              << -laser_odom_.pose.pose.position.x << " "
+//              << -laser_odom_.pose.pose.position.y << " "
+//              << -laser_odom_.pose.pose.position.z << " "
+//              << laser_odom_.pose.pose.orientation.x << " "
+//              << laser_odom_.pose.pose.orientation.y << " "
+//              << laser_odom_.pose.pose.orientation.z << " "
+//              << laser_odom_.pose.pose.orientation.w << std::endl;
+//          pose1.close();
+//        }
 
         break;
-      }
+      }//end INITED
       default: {
         break;
       }
@@ -2658,9 +2710,9 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
     }
   }
   // std::cout << "发布wi_trans_" <<std::endl;
-  wi_trans_.setRotation(tf::Quaternion{Q_WI_.x(), Q_WI_.y(), Q_WI_.z(), Q_WI_.w()});
-  wi_trans_.stamp_ = header.stamp;
-  tf_broadcaster_est_.sendTransform(wi_trans_);
+//  wi_trans_.setRotation(tf::Quaternion{Q_WI_.x(), Q_WI_.y(), Q_WI_.z(), Q_WI_.w()});
+//  wi_trans_.stamp_ = header.stamp;
+//  tf_broadcaster_est_.sendTransform(wi_trans_);
 
 }
 
@@ -2713,105 +2765,6 @@ void TransformAssociateToMap() {
   Transform transform_incre(transform_bef_mapped_.inverse() * transform_sum_.transform());
   transform_tobe_mapped_ = transform_tobe_mapped_ * transform_incre;
 }
-
-//处理lidar_info lio优化
-//vins 版本
-//void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &header)
-//{
-//    ROS_DEBUG("new odom coming ------------------------------------------");
-//	//暂时不涉及关键帧问题 每一帧都用
-//    //todo frame_count不会一直++
-//    Headers[frame_count] = header;
-//
-//    //new 这里做了改动 vins中先添加frame 然后初始化阶段赋值，这里直接给位姿
-//    //todo 零偏怎么给 initialStructure会估计零偏
-//    LidarFrame lidarframe(header.stamp.toSec());
-//    odometry_msg->pose.pose.position.x
-//        odometry_msg->pose.pose.orientation.w
-//    //提取平移部分
-//    lidarframe.T.x() = odometry_msg->pose.pose.position.x;
-//    lidarframe.T.y() = odometry_msg->pose.pose.position.y;
-//    lidarframe.T.z() = odometry_msg->pose.pose.position.z;
-//    // 提取旋转部分 (四元数 -> 旋转矩阵)
-//    Eigen::Quaterniond quaternion(
-//        odometry_msg->pose.pose.orientation.w,
-//        odometry_msg->pose.pose.orientation.x,
-//        odometry_msg->pose.pose.orientation.y,
-//        odometry_msg->pose.pose.orientation.z
-//    );
-//    lidarframe.R = quaternion.toRotationMatrix();
-//    lidarframe.pre_integration = tmp_pre_integration;
-//    all_lidar_frame.insert(make_pair(header.stamp.toSec(), lidarframe));
-//    //这里把tmp_pre_integration用了，重新开始预积分
-//    tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
-//
-//    std::cout << "key:" << key << std::endl;
-//    //todo 不估计外参 注意后面是否用了ric RIC ESTIMATE_EXTRINSIC=0
-//    if (solver_flag == INITIAL)
-//    {
-//        if (frame_count == window_size)
-//        {
-//            bool result = false;
-//            if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1)
-//            {
-//               result = initialStructure();
-//               initial_timestamp = header.stamp.toSec();
-//            }
-//            if(result)
-//            {
-//                solver_flag = NON_LINEAR;
-//                //todo 改到这里
-//                solveOdometry();
-//                slideWindow();
-//                ROS_INFO("Initialization finish!");
-//                last_R = Rs[window_size];
-//                last_P = Ps[window_size];
-//                last_R0 = Rs[0];
-//                last_P0 = Ps[0];
-//
-//            }
-//            else
-//                slideWindow();
-//            //todo 确认一下key++是否合理
-//            key++;
-//        }
-//        else
-//            frame_count++;
-//        	//todo 确认一下key++是否合理
-//        	key++;
-//    }
-//    else
-//    {
-//        TicToc t_solve;
-//        solveOdometry();
-//        ROS_DEBUG("solver costs: %fms", t_solve.toc());
-//
-//        if (failureDetection())
-//        {
-//            ROS_WARN("failure detection!");
-//            failure_occur = 1;
-//            clearState();
-//            setParameter();
-//            ROS_WARN("system reboot!");
-//            return;
-//        }
-//
-//        TicToc t_margin;
-//        slideWindow();
-//        ROS_DEBUG("marginalization costs: %fms", t_margin.toc());
-//        // prepare output of VINS
-//        key_poses.clear();
-//        for (int i = 0; i <= window_size; i++)
-//            key_poses.push_back(Ps[i]);
-//
-//        last_R = Rs[window_size];
-//        last_P = Ps[window_size];
-//        last_R0 = Rs[0];
-//        last_P0 = Ps[0];
-//        //todo 确认key++是否合理
-//        key++;
-//    }
-//}
 
 bool HasNewData() {
   return new_laser_cloud_corner_last_ && new_laser_cloud_surf_last_ &&
@@ -3208,6 +3161,7 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
   	} else {
   	}
 
+    //todo process会修改以下内容 除了transform
   	DLOG(INFO) << "laser_cloud_surf_last_[" << header.stamp.toSec() << "]: "
     	        << laser_cloud_surf_last_->size();
   	DLOG(INFO) << "laser_cloud_corner_last_[" << header.stamp.toSec() << "]: "
