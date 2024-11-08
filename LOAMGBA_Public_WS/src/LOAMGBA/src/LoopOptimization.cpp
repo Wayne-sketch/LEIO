@@ -57,6 +57,10 @@
 #include "factor/MarginalizationFactor.hpp"
 #include "factor/PivotPointPlaneFactor.hpp"
 
+using std::cout;
+using std::endl;
+using namespace std;
+using namespace geometryutils;
 //todo 全局变量、类型定义 能直接初始化在定义时初始化 不能的放在main函数中初始化
 //消息buffer + 消息队列锁
 std::queue<sensor_msgs::ImuConstPtr> imu_buf;
@@ -67,31 +71,136 @@ std::queue<sensor_msgs::PointCloud2ConstPtr> edgeBuf;
 std::mutex mBuf;
 std::mutex m_state; //没用上
 std::condition_variable con;
-//LIO estimator
-
+//measurementmanager和mapping相关放前面 estimator继承它们
+//measurementmanager相关---------------------------------------------
+double imu_last_time_ = -1;
+double curr_time_ = -1;
 //自定义的雷达数据结构 包含点云 里程计信息 用于getmeasurements()对齐
 class LidarInfo
 {
 	public:
     	LidarInfo(){};
-        sensor_msgs::PointCloud2 surf_cloud_;
-    	sensor_msgs::PointCloud2 edge_cloud_;
-		nav_msgs::Odometry laser_odometry_;
+        sensor_msgs::PointCloud2ConstPtr surf_cloud_;
+    	sensor_msgs::PointCloud2ConstPtr edge_cloud_;
+		nav_msgs::Odometry::ConstPtr laser_odometry_;
 }
+//mapping相关--------------------------------------------------------
+ros::Time time_laser_cloud_corner_last_;   ///< time of current last corner cloud
+ros::Time time_laser_cloud_surf_last_;     ///< time of current last surface cloud
+ros::Time time_laser_full_cloud_;      ///< time of current full resolution cloud
+ros::Time time_laser_odometry_;          ///< time of current laser odometry
 
+bool new_laser_cloud_corner_last_;  ///< flag if a new last corner cloud has been received
+bool new_laser_cloud_surf_last_;    ///< flag if a new last surface cloud has been received
+bool new_laser_full_cloud_;     ///< flag if a new full resolution cloud has been received
+bool new_laser_odometry_;         ///< flag if a new laser odometry has been received
+//存lidar帧位姿
+Transform transform_sum_;
+Transform transform_tobe_mapped_;
+Transform transform_bef_mapped_;
+Transform transform_aft_mapped_;
+//存点云
+PointCloudPtr laser_cloud_corner_last_;   ///< last corner points cloud
+PointCloudPtr laser_cloud_surf_last_;     ///< last surface points cloud
+PointCloudPtr full_cloud_;      ///< last full resolution cloud
 
-
-
-
-using std::cout;
-using std::endl;
-using namespace std;
-using namespace geometryutils;
 typedef pcl::PointXYZI PointT;
 typedef typename pcl::PointCloud<PointT> PointCloud;
 typedef typename pcl::PointCloud<PointT>::Ptr PointCloudPtr;
 typedef typename pcl::PointCloud<PointT>::ConstPtr PointCloudConstPtr;
 typedef Twist<double> Transform;
+
+//LIO estimator------------------------------------------------------
+bool first_imu_ = false;
+double initial_time_ = -1;
+//imu中值积分的时候前一刻的imu信息 临时存储变量
+Eigen::Vector3d acc_last_, gyr_last_;
+Eigen::Vector3d g_vec_;
+//所有的buffer
+CircularBuffer<PairTimeLaserTransform> all_laser_transforms_{estimator_config_.window_size + 1};
+CircularBuffer<Vector3d> Ps_{estimator_config_.window_size + 1};
+CircularBuffer<Matrix3d> Rs_{estimator_config_.window_size + 1};
+CircularBuffer<Vector3d> Vs_{estimator_config_.window_size + 1};
+CircularBuffer<Vector3d> Bas_{estimator_config_.window_size + 1};
+CircularBuffer<Vector3d> Bgs_{estimator_config_.window_size + 1};
+CircularBuffer<size_t> size_surf_stack_{estimator_config_.window_size + 1};
+CircularBuffer<size_t> size_corner_stack_{estimator_config_.window_size + 1};
+bool init_local_map_ = false;
+//endregion
+CircularBuffer<std_msgs::Header> Headers_{estimator_config_.window_size + 1};
+CircularBuffer<vector<double> > dt_buf_{estimator_config_.window_size + 1};
+CircularBuffer<vector<Vector3d> > linear_acceleration_buf_{estimator_config_.window_size + 1};
+CircularBuffer<vector<Vector3d> > angular_velocity_buf_{estimator_config_.window_size + 1};
+CircularBuffer<shared_ptr<IntegrationBase> > pre_integrations_{estimator_config_.window_size + 1};
+CircularBuffer<PointCloudPtr> surf_stack_{estimator_config_.window_size + 1};
+CircularBuffer<PointCloudPtr> corner_stack_{estimator_config_.window_size + 1};
+CircularBuffer<PointCloudPtr> full_stack_{estimator_config_.window_size + 1};
+///> optimization buffers
+CircularBuffer<bool> opt_point_coeff_mask_{estimator_config_.opt_window_size + 1};
+CircularBuffer<ScorePointCoeffMap> opt_point_coeff_map_{estimator_config_.opt_window_size + 1};
+CircularBuffer<CubeCenter> opt_cube_centers_{estimator_config_.opt_window_size + 1};
+CircularBuffer<Transform> opt_transforms_{estimator_config_.opt_window_size + 1};
+CircularBuffer<vector<size_t> > opt_valid_idx_{estimator_config_.opt_window_size + 1};
+CircularBuffer<PointCloudPtr> opt_corner_stack_{estimator_config_.opt_window_size + 1};
+CircularBuffer<PointCloudPtr> opt_surf_stack_{estimator_config_.opt_window_size + 1};
+CircularBuffer<Eigen::Matrix<double, 6, 6>> opt_matP_{estimator_config_.opt_window_size + 1};
+///< optimization buffers
+//todo 需要追踪一下cir_buf_count_
+size_t cir_buf_count_ = 0;
+size_t laser_odom_recv_count_ = 0;
+std::shared_ptr<leio::IntegrationBase> tmp_pre_integration_;
+struct StampedTransform {
+  double time;
+  Transform transform;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+//用于点云去畸变
+CircularBuffer<StampedTransform> imu_stampedtransforms{100};
+enum EstimatorStageFlag {
+  NOT_INITED,
+  INITED,
+};
+EstimatorStageFlag stage_flag_ = NOT_INITED;
+//todo 改到这里
+struct EstimatorConfig {
+  size_t window_size = 15;
+  size_t opt_window_size = 5;
+  int init_window_factor = 3;
+  int estimate_extrinsic = 2;
+
+  float corner_filter_size = 0.2;
+  float surf_filter_size = 0.4;
+  float map_filter_size = 0.6;
+
+  float min_match_sq_dis = 1.0;
+  float min_plane_dis = 0.2;
+  Transform transform_lb{Eigen::Quaternionf(1, 0, 0, 0), Eigen::Vector3f(0, 0, -0.1)};
+
+  bool opt_extrinsic = false;
+
+  bool run_optimization = true;
+  bool update_laser_imu = true;
+  bool gravity_fix = true;
+  bool plane_projection_factor = true;
+  bool imu_factor = true;
+  bool point_distance_factor = false;
+  bool prior_factor = false;
+  bool marginalization_factor = true;
+  bool pcl_viewer = false;
+
+  bool enable_deskew = true; ///< if disable, deskew from PointOdometry will be used
+  bool cutoff_deskew = false;
+  bool keep_features = false;
+
+  IntegrationBaseConfig pim_config;
+};
+
+
+
+
+
+
+
 
 //局部地图点云
 PointCloudPtr local_surf_points_ptr_, local_surf_points_filtered_ptr_;
@@ -115,9 +224,7 @@ bool gravity_fixed_ = false;
   Vector3d P_pivot_;
   Matrix3d R_pivot_;
 
-PointCloudPtr laser_cloud_corner_last_;   ///< last corner points cloud
-PointCloudPtr laser_cloud_surf_last_;     ///< last surface points cloud
-PointCloudPtr full_cloud_;      ///< last full resolution cloud
+
 
 //lio-mapping中mapping部分用到的
 float scan_period_;
@@ -128,23 +235,12 @@ long frame_count_ = num_stack_frames_ - 1;        ///< number of processed frame
 const int num_map_frames_;
 int extrinsic_stage_ = 1;
 
-Transform transform_sum_;
-Transform transform_tobe_mapped_;
-Transform transform_bef_mapped_;
-Transform transform_aft_mapped_;
+
 
 Transform transform_tobe_mapped_bef_;
 Transform transform_es_;
 
-ros::Time time_laser_cloud_corner_last_;   ///< time of current last corner cloud
-ros::Time time_laser_cloud_surf_last_;     ///< time of current last surface cloud
-ros::Time time_laser_full_cloud_;      ///< time of current full resolution cloud
-ros::Time time_laser_odometry_;          ///< time of current laser odometry
 
-bool new_laser_cloud_corner_last_;  ///< flag if a new last corner cloud has been received
-bool new_laser_cloud_surf_last_;    ///< flag if a new last surface cloud has been received
-bool new_laser_full_cloud_;     ///< flag if a new full resolution cloud has been received
-bool new_laser_odometry_;         ///< flag if a new laser odometry has been received
 
 bool is_ros_setup_ = false;
 bool compact_data_ = false;
@@ -152,42 +248,6 @@ bool imu_inited_ = false;
 
 //end lio-mapping mapping
 
-//滑窗
-//todo 滑窗相关的buffer和vins命名稍有不同 需要全换成lio_mapping的
-CircularBuffer<PairTimeLaserTransform> all_laser_transforms_{window_size + 1};
-CircularBuffer<Vector3d> Ps_{window_size + 1};
-CircularBuffer<Matrix3d> Rs_{window_size + 1};
-CircularBuffer<Vector3d> Vs_{window_size + 1};
-CircularBuffer<Vector3d> Bas_{window_size + 1};
-CircularBuffer<Vector3d> Bgs_{window_size + 1};
-
-CircularBuffer<std_msgs::Header> Headers_{window_size + 1};
-//用于点云去畸变
-CircularBuffer<StampedTransform> imu_stampedtransforms{100};
-
-CircularBuffer<vector<double> > dt_buf_{window_size + 1};
-CircularBuffer<vector<Vector3d> > linear_acceleration_buf_{window_size + 1};
-CircularBuffer<vector<Vector3d> > angular_velocity_buf_{window_size + 1};
-
-CircularBuffer<shared_ptr<IntegrationBase> > pre_integrations_{window_size + 1};
-CircularBuffer<PointCloudPtr> surf_stack_{window_size + 1};
-CircularBuffer<PointCloudPtr> corner_stack_{window_size + 1};
-CircularBuffer<PointCloudPtr> full_stack_{window_size + 1};
-
-///> optimization buffers
-CircularBuffer<bool> opt_point_coeff_mask_{opt_window_size + 1};
-CircularBuffer<ScorePointCoeffMap> opt_point_coeff_map_{opt_window_size + 1};
-CircularBuffer<CubeCenter> opt_cube_centers_{opt_window_size + 1};
-CircularBuffer<Transform> opt_transforms_{opt_window_size + 1};
-CircularBuffer<vector<size_t> > opt_valid_idx_{opt_window_size + 1};
-CircularBuffer<PointCloudPtr> opt_corner_stack_{opt_window_size + 1};
-CircularBuffer<PointCloudPtr> opt_surf_stack_{opt_window_size + 1};
-
-CircularBuffer<Eigen::Matrix<double, 6, 6>> opt_matP_{opt_window_size + 1};
-///< optimization buffers
-//todo 需要追踪一下cir_buf_count_
-size_t cir_buf_count_ = 0;
-size_t laser_odom_recv_count_ = 0;
 
 //todo 参数设定 有些可能用不上 再删除
 //todo factor可能会和真的factor冲突
@@ -254,7 +314,6 @@ int estimate_extrinsic = 2;
 bool init_imu = 1;
 bool init_odom = 0;
 double latest_time;
-double current_time = -1;
 //frame_count到达window_size后就不再增加
 int frame_count = 0;
 //key为gtsam使用的变量索引 会持续增加
@@ -264,19 +323,15 @@ Eigen::Quaterniond tmp_Q;
 Eigen::Vector3d tmp_V;
 Eigen::Vector3d tmp_Ba;
 Eigen::Vector3d tmp_Bg;
-//imu中值积分的时候前一刻的imu信息 临时存储变量
-//Eigen::Vector3d acc_0;
-//Eigen::Vector3d gyr_0;
-Eigen::Vector3d acc_last_, gyr_last_;
-Eigen::Vector3d g_vec_;
 
 
-bool first_imu = false;
+
+
+
 //imu预积分滑窗
 //todo 把vins替换成lio-mapping
 IntegrationBase *pre_integrations[(window_size + 1)];
-//IntegrationBase *tmp_pre_integration;
-std::shared_ptr<IntegrationBase> tmp_pre_integration_;
+
 vector<double> dt_buf[(window_size + 1)];
 vector<Vector3d> linear_acceleration_buf[(window_size + 1)];
 vector<Vector3d> angular_velocity_buf[(window_size + 1)];
@@ -325,19 +380,9 @@ struct LaserTransform {
 
 };
 
-struct StampedTransform {
-  double time;
-  Transform transform;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
 
-enum EstimatorStageFlag {
-  NOT_INITED,
-  INITED,
-};
-EstimatorStageFlag stage_flag_ = NOT_INITED;
-  bool first_imu_ = false;
-  double initial_time_ = -1;
+
+
 
 //todo vins换lio-mapping
 SolverFlag solver_flag = INITIAL;
@@ -389,11 +434,11 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 //对imu做积分 把最新状态赋值给最新lidar帧
 void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
 {
-    if (!first_imu)
+    if (!first_imu_)
     {
-        first_imu = true;
-        acc_0 = linear_acceleration;
-        gyr_0 = angular_velocity;
+        first_imu_ = true;
+        acc_last_ = linear_acceleration;
+        gyr_last_ = angular_velocity;
         //for lio
         dt_buf_.push(vector<double>());
     	linear_acceleration_buf_.push(vector<Vector3d>());
@@ -2262,7 +2307,7 @@ void clearState()
     }
 
     solver_flag = INITIAL;
-    first_imu = false,
+    first_imu_ = false,
     frame_count = 0;
     key = 0;
     //todo 需要对gtsam相关的内容进行管理
@@ -2666,6 +2711,7 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
 
   TicToc tic_toc_decoder;
 
+  //位姿取出来
   {
     transform_sum_.pos.x() = lidar_info.laser_odometry_.pose.pose.position.x;
     transform_sum_.pos.y() = lidar_info.laser_odometry_.pose.pose.position.y;
@@ -2676,6 +2722,7 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
     transform_sum_.rot.w() = lidar_info.laser_odometry_.pose.pose.orientation.w;
   }
 
+  //点云取出来
   {
     laser_cloud_corner_last_->clear();
     laser_cloud_surf_last_->clear();
@@ -3153,9 +3200,9 @@ void predict(const sensor_msgs::ImuConstPtr &imu_msg)
     double rz = imu_msg->angular_velocity.z;
     Eigen::Vector3d angular_velocity{rx, ry, rz};
 
-    Eigen::Vector3d un_acc_0 = tmp_Q * (acc_0 - tmp_Ba) - estimator.g;
+    Eigen::Vector3d un_acc_0 = tmp_Q * (acc_last_ - tmp_Ba) - estimator.g;
 
-    Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - tmp_Bg;
+    Eigen::Vector3d un_gyr = 0.5 * (gyr_last_ + angular_velocity) - tmp_Bg;
     tmp_Q = tmp_Q * Utility::deltaQ(un_gyr * dt);
 
     Eigen::Vector3d un_acc_1 = tmp_Q * (linear_acceleration - tmp_Ba) - estimator.g;
@@ -3166,8 +3213,8 @@ void predict(const sensor_msgs::ImuConstPtr &imu_msg)
     tmp_P = tmp_P + dt * tmp_V + 0.5 * dt * dt * un_acc;
     tmp_V = tmp_V + dt * un_acc;
 	//上一imu的加速度 角速度 用于中值积分
-    acc_0 = linear_acceleration;
-    gyr_0 = angular_velocity;
+    acc_last_ = linear_acceleration;
+    gyr_last_ = angular_velocity;
 }
 
 void update()
@@ -3179,8 +3226,8 @@ void update()
     tmp_V = estimator.Vs[window_size];
     tmp_Ba = estimator.Bas[window_size];
     tmp_Bg = estimator.Bgs[window_size];
-    acc_0 = estimator.acc_0;
-    gyr_0 = estimator.gyr_0;
+    acc_last_ = estimator.acc_last_;
+    gyr_last_ = estimator.gyr_last_;
 
     queue<sensor_msgs::ImuConstPtr> tmp_imu_buf = imu_buf;
     for (sensor_msgs::ImuConstPtr tmp_imu_msg; !tmp_imu_buf.empty(); tmp_imu_buf.pop())
@@ -3392,7 +3439,7 @@ void process_lio()
             return (measurements = getMeasurements()).size() != 0;
                  });
         lk.unlock();
-        //vins中和restart有关 这里用不着 需要确认这个锁的控制范围
+        //vins中和restart有关 这里用不着
 //        m_estimator.lock();
 		for (auto &measurement : measurements)
         {
@@ -3400,16 +3447,16 @@ void process_lio()
             double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
             for (auto &imu_msg : measurement.first)
             {
-                double t = imu_msg->header.stamp.toSec();
-                double lidar_info_t = lidar_info.odom_msg->header.stamp.toSec();
-                if (t <= odom_t)
+                double imu_time = imu_msg->header.stamp.toSec();
+                double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
+                if (imu_time <= lidar_info_time)
                 {
                   //todo vins中有update()会更新current_time
-                    if (current_time < 0)
-                        current_time = t;
-                    double dt = t - current_time;
+                    if (curr_time_ < 0)
+                        curr_time_ = t;
+                    double dt = imu_time - curr_time_;
                     ROS_ASSERT(dt >= 0);
-                    current_time = t;
+                    curr_time_ = imu_time;
                     dx = imu_msg->linear_acceleration.x;
                     dy = imu_msg->linear_acceleration.y;
                     dz = imu_msg->linear_acceleration.z;
@@ -3418,13 +3465,12 @@ void process_lio()
                     rz = imu_msg->angular_velocity.z;
                     processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
                     //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
-
                 }
                 else
                 {
-                    double dt_1 = odom_t - current_time;
-                    double dt_2 = t - lidar_info_t;
-                    current_time = lidar_info_t;
+                    double dt_1 = lidar_info_time - curr_time_;
+                    double dt_2 = imu_time - lidar_info_time;
+                    curr_time_ = lidar_info_time;
                     ROS_ASSERT(dt_1 >= 0);
                     ROS_ASSERT(dt_2 >= 0);
                     ROS_ASSERT(dt_1 + dt_2 > 0);
@@ -3442,8 +3488,7 @@ void process_lio()
             }
 
             TicToc t_s;
-            //todo 目前改到这里 要传参数吗？
-            processLidarInfo(lidar_info, lidar_info.odom_msg->header);
+            processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
 
             double whole_t = t_s.toc();
 //            printStatistics(estimator, whole_t);

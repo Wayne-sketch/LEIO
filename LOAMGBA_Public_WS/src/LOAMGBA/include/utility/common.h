@@ -2,7 +2,7 @@
  * @Author: ctx cuitongxin201024@163.com
  * @Date: 2024-10-25 09:02:28
  * @LastEditors: ctx cuitongxin201024@163.com
- * @LastEditTime: 2024-10-27 13:37:53
+ * @LastEditTime: 2024-11-08 13:48:48
  * @FilePath: \LEIO\LOAMGBA_Public_WS\src\LOAMGBA\include\utility\common.h
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -72,16 +72,6 @@ struct Pose6D {
   double roll;
   double pitch;
   double yaw;
-};
-
-class Frame {
-public:
-  //位姿
-  gtsam::Pose3 pose;
-  //速度
-  gtsam::Vector3 velocity;
-  //零偏
-  gtsam::imuBias::ConstantBias bias;
 };
 
 template<typename T>

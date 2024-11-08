@@ -31,6 +31,7 @@ enum StateOrder {
   O_BG = 12,
 };
 
+//todo 在这里设定IMU参数
 struct IntegrationBaseConfig {
   double acc_n = 0.1;
   double gyr_n = 0.01;
