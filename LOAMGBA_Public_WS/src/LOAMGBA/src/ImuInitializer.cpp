@@ -28,7 +28,7 @@
 // Created by hyye on 5/20/18.
 //
 
-#include "imu_processor/ImuInitializer.h"
+#include "imu_processor/ImuInitializer.hpp"
 
 namespace leio {
 
