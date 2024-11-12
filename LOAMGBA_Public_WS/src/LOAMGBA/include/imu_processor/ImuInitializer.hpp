@@ -37,17 +37,17 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
 
-#include "imu_processor/IntegrationBase.h"
+#include "imu_processor/IntegrationBase.hpp"
 
-#include "utils/Twist.h"
-#include "utils/common_ros.h"
-#include "utils/TicToc.h"
-#include "utils/math_utils.h"
-#include "utils/geometry_utils.h"
-#include "utils/CircularBuffer.h"
+#include "utils/Twist.hpp"
+//#include "utils/common_ros.h"
+//#include "utils/TicToc.h"
+#include "utils/math_utils.hpp"
+#include "utils/geometry_utils.hpp"
+#include "utils/CircularBuffer.hpp"
 #include "3rdparty/sophus/se3.hpp"
 
-//namespace leio {
+namespace leio {
 
 using namespace std;
 using namespace mathutils;
@@ -90,6 +90,6 @@ class ImuInitializer {
 
 };
 
-//}
+}
 
 #endif //LIO_IMUINITIALIZER_H_

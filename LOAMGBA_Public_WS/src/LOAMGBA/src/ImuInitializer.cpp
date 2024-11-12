@@ -30,7 +30,7 @@
 
 #include "imu_processor/ImuInitializer.hpp"
 
-//namespace leio {
+namespace leio {
 
 MatrixXd TangentBasis(Vector3d &g0) {
   Vector3d b, c;
@@ -451,4 +451,4 @@ bool ImuInitializer::Initialization(CircularBuffer<PairTimeLaserTransform> &all_
 
 }
 
-//}
+}

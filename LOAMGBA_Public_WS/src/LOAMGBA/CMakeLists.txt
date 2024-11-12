@@ -71,18 +71,27 @@ target_link_libraries(balm_back_end ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenC
 
 
 
+#add_executable(alaserPGO
+#		src/LoopOptimization.cpp
+#		include/utility/Scancontext.cpp
+#        include/utility/VoxelGridLargeScale.cpp
+#		include/CSF/c2cdist.cpp
+#		include/CSF/Cloth.cpp
+#		include/CSF/Constraint.cpp
+#		include/CSF/Particle.cpp
+#		include/CSF/point_cloud.cpp
+#		include/CSF/Rasterization.cpp
+#		include/CSF/XYZReader.cpp
+#		include/CSF/CSF.cpp)
+
 add_executable(alaserPGO
 		src/LoopOptimization.cpp
-		include/utility/Scancontext.cpp
-        include/utility/VoxelGridLargeScale.cpp
-		include/CSF/c2cdist.cpp
-		include/CSF/Cloth.cpp
-		include/CSF/Constraint.cpp
-		include/CSF/Particle.cpp
-		include/CSF/point_cloud.cpp
-		include/CSF/Rasterization.cpp
-		include/CSF/XYZReader.cpp
-		include/CSF/CSF.cpp)
+		src/ImuInitializer.cpp
+		src/feature_manager/FeatureManager.cpp
+		src/factor/MarginalizationFactor.cpp
+		src/factor/PivotPointPlaneFactor.cpp
+		src/factor/PoseLocalParameterization.cpp
+		src/factor/PriorFactor.cpp)
 
 target_compile_options(alaserPGO
   PRIVATE ${OpenMP_CXX_FLAGS}

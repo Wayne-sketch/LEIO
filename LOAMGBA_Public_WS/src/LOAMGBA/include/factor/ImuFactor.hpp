@@ -37,7 +37,7 @@
 #include "imu_processor/IntegrationBase.hpp"
 #include "utils/math_utils.hpp"
 
-//namespace leio {
+namespace leio {
 
 using namespace mathutils;
 
@@ -174,6 +174,6 @@ class ImuFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9> {
 
 };
 
-//} // namespace leio
+} // namespace leio
 
 #endif //LIO_IMUFACTOR_H_

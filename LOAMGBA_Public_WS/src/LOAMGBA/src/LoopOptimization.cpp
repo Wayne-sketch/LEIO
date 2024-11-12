@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include <optional>
+#include <map>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -23,6 +24,7 @@
 #include <pcl/octree/octree_pointcloud_voxelcentroid.h>
 #include <pcl/filters/crop_box.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/features/normal_3d.h>
 
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
@@ -40,30 +42,58 @@
 
 #include "utility/common.h"
 #include "utility/tic_toc.h"
-#include "utility/integration_base.h"
 
 #include <pcl/io/pcd_io.h>
-#include <image_transport/image_transport.h>
-#include "utility/Scancontext.h"
-#include "lidarFactor.hpp"
 
-#include "CSF/CSF.h"
 #include "feature_manager/FeatureManager.hpp"
-#include "utils/Twist.hpp"
-#include "utils/CircularBuffer.hpp"
-#include "utils/geometry_utils.hpp"
-#include "utils/math_utils.hpp"
+#include "../include/utils/Twist.hpp"
+#include "../include/utils/CircularBuffer.hpp"
+#include "../include/utils/geometry_utils.hpp"
+#include "../include/utils/math_utils.hpp"
+#include "../include/3rdparty/sophus/se3.hpp"
 #include "factor/PoseLocalParameterization.hpp"
 #include "factor/MarginalizationFactor.hpp"
 #include "factor/PivotPointPlaneFactor.hpp"
+#include "factor/PriorFactor.hpp"
+#include "factor/ImuFactor.hpp"
 #include "imu_processor/ImuInitializer.hpp"
 #include "imu_processor/IntegrationBase.hpp"
-
+typedef pcl::PointXYZI PointT;
+typedef typename pcl::PointCloud<PointT> PointCloud;
+typedef typename pcl::PointCloud<PointT>::Ptr PointCloudPtr;
+typedef typename pcl::PointCloud<PointT>::ConstPtr PointCloudConstPtr;
+typedef Twist<float> Transform;
+typedef Sophus::SO3f SO3;
+typedef std::multimap<float, std::pair<PointT, PointT>, std::greater<float> > ScorePointCoeffMap;
 using std::cout;
 using std::endl;
 using namespace std;
 using namespace geometryutils;
+using Eigen::Vector3d;
+using Eigen::Matrix3d;
+using std::shared_ptr;
+using std::unique_ptr;
 //todo 全局变量、类型定义 能直接初始化在定义时初始化 不能的放在main函数中初始化
+// IMU参数 + 外参
+double imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
+double imuGyrNoise = 1.5636343949698187e-03;          // 角速度噪声标准差
+double imuAccBiasN = 6.4356659353532566e-05;          //
+double imuGyrBiasN = 3.5640318696367613e-05;
+double imuGravity = 9.80511;           // 重力加速度
+double imuRPYWeight = 0.01; //not used
+//给的是imu to lidar
+vector<double> extRotV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
+                   2.024406e-03, 1.482454e-02, 9.998881e-01};
+vector<double> extRPYV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
+                   2.024406e-03, 1.482454e-02, 9.998881e-01};
+vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
+Eigen::Matrix3d extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);     // xyz坐标系旋转
+Eigen::Matrix3d extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);     // RPY欧拉角的变换关系
+Eigen::Vector3d extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);   // xyz坐标系平移
+Eigen::Quaterniond extQRPY = Eigen::Quaterniond(extRPY).inverse();
+
 //消息buffer + 消息队列锁
 std::queue<sensor_msgs::ImuConstPtr> imu_buf;
 double last_imu_t = 0;   //imuHandler使用
@@ -85,14 +115,8 @@ class LidarInfo
         sensor_msgs::PointCloud2ConstPtr surf_cloud_;
     	sensor_msgs::PointCloud2ConstPtr edge_cloud_;
 		nav_msgs::Odometry::ConstPtr laser_odometry_;
-}
+};
 //mapping相关--------------------------------------------------------
-typedef pcl::PointXYZI PointT;
-typedef typename pcl::PointCloud<PointT> PointCloud;
-typedef typename pcl::PointCloud<PointT>::Ptr PointCloudPtr;
-typedef typename pcl::PointCloud<PointT>::ConstPtr PointCloudConstPtr;
-typedef Twist<double> Transform;
-typedef Sophus::SO3f SO3;
 struct CubeCenter {
   int laser_cloud_cen_length;
   int laser_cloud_cen_width;
@@ -108,26 +132,26 @@ struct CubeCenter {
 bool system_inited_ = false;
 size_t num_max_iterations_ = 10; //scan to map的最大次数
 
-int laser_cloud_cen_length_; //记录当前位姿的索引 作为局部地图的中心
-int laser_cloud_cen_width_;
-int laser_cloud_cen_height_;
-const size_t laser_cloud_length_;
-const size_t laser_cloud_width_;
-const size_t laser_cloud_height_;
-const size_t laser_cloud_num_;
+int laser_cloud_cen_length_ = 10; //记录当前位姿的索引 作为局部地图的中心
+int laser_cloud_cen_width_ = 10;
+int laser_cloud_cen_height_ = 5;
+const size_t laser_cloud_length_ = 21;
+const size_t laser_cloud_width_ = 21;
+const size_t laser_cloud_height_ = 11;
+const size_t laser_cloud_num_ = laser_cloud_length_ * laser_cloud_width_ * laser_cloud_height_;
 
-double delta_r_abort_; //优化终止条件
-double delta_t_abort_;
+double delta_r_abort_ = 0.05; //优化终止条件
+double delta_t_abort_ = 0.05;
 //存接收到的每帧点云
-PointCloudPtr laser_cloud_corner_last_;   ///< last corner points cloud
-PointCloudPtr laser_cloud_surf_last_;     ///< last surface points cloud
-PointCloudPtr full_cloud_;      ///< last full resolution cloud
+PointCloudPtr laser_cloud_corner_last_(new PointCloud());   ///< last corner points cloud
+PointCloudPtr laser_cloud_surf_last_(new PointCloud());     ///< last surface points cloud
+PointCloudPtr full_cloud_(new PointCloud());      ///< last full resolution cloud
 
 //存当前一帧点云 当前lidar系坐标 和降采样后的点云
-PointCloudPtr laser_cloud_corner_stack_;
-PointCloudPtr laser_cloud_surf_stack_;
-PointCloudPtr laser_cloud_corner_stack_downsampled_;  ///< down sampled
-PointCloudPtr laser_cloud_surf_stack_downsampled_;    ///< down sampled
+PointCloudPtr laser_cloud_corner_stack_(new PointCloud());
+PointCloudPtr laser_cloud_surf_stack_(new PointCloud());
+PointCloudPtr laser_cloud_corner_stack_downsampled_(new PointCloud());  ///< down sampled
+PointCloudPtr laser_cloud_surf_stack_downsampled_(new PointCloud());    ///< down sampled
 //降采样器
 pcl::VoxelGrid<pcl::PointXYZI> down_size_filter_corner_;   ///< voxel filter for down sizing corner clouds
 pcl::VoxelGrid<pcl::PointXYZI> down_size_filter_surf_;     ///< voxel filter for down sizing surface clouds
@@ -142,11 +166,11 @@ std::vector<size_t> laser_cloud_valid_idx_;
 //局部地图内的所有点云cube索引
 std::vector<size_t> laser_cloud_surround_idx_;
 
-PointCloudPtr laser_cloud_surround_;
-PointCloudPtr laser_cloud_surround_downsampled_;     ///< down sampled
+PointCloudPtr laser_cloud_surround_(new PointCloud());
+PointCloudPtr laser_cloud_surround_downsampled_(new PointCloud());     ///< down sampled
 //局部地图 世界系下的坐标
-PointCloudPtr laser_cloud_corner_from_map_;
-PointCloudPtr laser_cloud_surf_from_map_;
+PointCloudPtr laser_cloud_corner_from_map_(new PointCloud());
+PointCloudPtr laser_cloud_surf_from_map_(new PointCloud());
 
 ros::Time time_laser_cloud_corner_last_;   ///< time of current last corner cloud
 ros::Time time_laser_cloud_surf_last_;     ///< time of current last surface cloud
@@ -163,15 +187,15 @@ Transform transform_tobe_mapped_;
 Transform transform_bef_mapped_; //scan to map前的位姿
 Transform transform_aft_mapped_; //scan to map后的位姿
 
-float scan_period_;
-float time_factor_;
-long frame_count_ = num_stack_frames_ - 1;   ///< number of processed frames
-long map_frame_count_;
+float scan_period_; //not used
+float time_factor_; //not used
 const int num_stack_frames_ = 1;
-const int num_map_frames_;
+const int num_map_frames_ = 5;
+long frame_count_ = num_stack_frames_ - 1;   ///< number of processed frames
+long map_frame_count_ = num_map_frames_ - 1;
 
-bool is_ros_setup_ = false;
-bool compact_data_ = false;
+bool is_ros_setup_ = false; //not used
+bool compact_data_ = false; //not used
 bool imu_inited_ = false;
 
 multimap<float, pair<PointT, PointT>, greater<float> > score_point_coeff_;
@@ -191,10 +215,10 @@ enum EstimatorStageFlag {
 };
 //需要把变量都改一下
 struct EstimatorConfig {
-  size_t window_size = 15;
+  size_t window_size = 7;
   size_t opt_window_size = 5;
-  int init_window_factor = 3;
-  int estimate_extrinsic = 2; //not used
+  int init_window_factor = 1;
+  int estimate_extrinsic = 1; //not used
 
   float corner_filter_size = 0.2;
   float surf_filter_size = 0.4;
@@ -205,29 +229,31 @@ struct EstimatorConfig {
   //todo 追踪
   Transform transform_lb{Eigen::Quaternionf(1, 0, 0, 0), Eigen::Vector3f(0, 0, -0.1)};
 
-  bool opt_extrinsic = false; //not used
+  bool opt_extrinsic = true; //not used
 
   bool run_optimization = true;
   bool update_laser_imu = true;
   bool gravity_fix = true; //not used
-  bool plane_projection_factor = true; //not used
+  bool plane_projection_factor = false; //not used
   bool imu_factor = true;
-  bool point_distance_factor = false;
-  bool prior_factor = false; //not used
+  bool point_distance_factor = true;
+  bool prior_factor = true; //true: 外参参与优化尽量保持不变
   bool marginalization_factor = true;
   bool pcl_viewer = false; //not used
 
+  //todo 这里可能要改 不需要去畸变
   bool enable_deskew = true; ///< if disable, deskew from PointOdometry will be used
-  bool cutoff_deskew = false;
+  bool cutoff_deskew = true;
   bool keep_features = false;
 
-  IntegrationBaseConfig pim_config;
+  leio::IntegrationBaseConfig pim_config;
 };
 int extrinsic_stage_ = 1; //外参估计
 EstimatorStageFlag stage_flag_ = NOT_INITED;
 EstimatorConfig estimator_config_;
+
 //所有的buffer
-CircularBuffer<PairTimeLaserTransform> all_laser_transforms_{estimator_config_.window_size + 1};
+CircularBuffer<leio::PairTimeLaserTransform> all_laser_transforms_{estimator_config_.window_size + 1};
 //下面的buffer存的是IMU系位姿
 CircularBuffer<Vector3d> Ps_{estimator_config_.window_size + 1};
 CircularBuffer<Matrix3d> Rs_{estimator_config_.window_size + 1};
@@ -241,7 +267,7 @@ CircularBuffer<std_msgs::Header> Headers_{estimator_config_.window_size + 1};
 CircularBuffer<vector<double> > dt_buf_{estimator_config_.window_size + 1};
 CircularBuffer<vector<Vector3d> > linear_acceleration_buf_{estimator_config_.window_size + 1};
 CircularBuffer<vector<Vector3d> > angular_velocity_buf_{estimator_config_.window_size + 1};
-CircularBuffer<shared_ptr<IntegrationBase> > pre_integrations_{estimator_config_.window_size + 1};
+CircularBuffer<shared_ptr<leio::IntegrationBase> > pre_integrations_{estimator_config_.window_size + 1};
 CircularBuffer<PointCloudPtr> surf_stack_{estimator_config_.window_size + 1};
 CircularBuffer<PointCloudPtr> corner_stack_{estimator_config_.window_size + 1};
 CircularBuffer<PointCloudPtr> full_stack_{estimator_config_.window_size + 1};
@@ -268,7 +294,10 @@ struct StampedTransform {
 CircularBuffer<StampedTransform> imu_stampedtransforms{100};
 Transform transform_tobe_mapped_bef_;
 Transform transform_es_;
-Transform transform_lb_{Eigen::Quaterniond(extRPY), extTrans}; ///< Base to laser transform
+//double赋值给float需要cast
+Eigen::Quaternionf extRPY_f = Eigen::Quaterniond(extRPY).cast<float>();
+Eigen::Vector3f extTrans_f = extTrans.cast<float>();
+Transform transform_lb_{extRPY_f, extTrans_f}; ///< Base to laser transform
 Eigen::Matrix3d R_WI_; ///< R_WI is the rotation from the inertial frame into Lidar's world frame
 Eigen::Quaterniond Q_WI_; ///< Q_WI is the rotation from the inertial frame into Lidar's world frame
 //tf变换  
@@ -285,11 +314,11 @@ bool convergence_flag_ = false;
 double **para_pose_;
 double **para_speed_bias_;
 //todo 外参不估计 和外参相关的内容需要适配 主要是ceres求残差部分
-double para_ex_pose_[SIZE_POSE];
+double para_ex_pose_[leio::SIZE_POSE];
 double g_norm_;
 bool gravity_fixed_ = false;
 //边缘化所需
-MarginalizationInfo *last_marginalization_info;
+leio::MarginalizationInfo *last_marginalization_info;
 vector<double *> last_marginalization_parameter_blocks;
 vector<Eigen::Vector4d, Eigen::aligned_allocator<Eigen::Vector4d> > marg_coeffi, marg_coeffj;
 vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > marg_pointi, marg_pointj;
@@ -299,42 +328,16 @@ Matrix3d R_pivot_;
 
 
 
-
-//todo 参数设定
-//todo factor可能会和真的factor冲突
-// IMU参数
-float imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
-float imuGyrNoise = 1.5636343949698187e-03;          // 角速度噪声标准差
-float imuAccBiasN = 6.4356659353532566e-05;          //
-float imuGyrBiasN = 3.5640318696367613e-05;
-float imuGravity = 9.80511;           // 重力加速度
-float imuRPYWeight = 0.01;
-//给的是imu to lidar
-vector<double> extRotV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
-                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
-                   2.024406e-03, 1.482454e-02, 9.998881e-01};
-vector<double> extRPYV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
-                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
-                   2.024406e-03, 1.482454e-02, 9.998881e-01};
-vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
-Eigen::Matrix3d extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);     // xyz坐标系旋转
-Eigen::Matrix3d extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);     // RPY欧拉角的变换关系
-Eigen::Vector3d extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);   // xyz坐标系平移
-Eigen::Quaterniond extQRPY = Eigen::Quaterniond(extRPY).inverse();
-//不估计外参 这个永远是固定的 vins中和相机数量一致 这里就一个 这里要给lidar to imu
-Matrix3d ric = extRot.transpose();
-Vector3d tic = -ric * extTrans;
-
 //激光里程计回调函数
 void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 {
-    if (!init_odom)
-    {
-      //其实可以不用跳
-        //skip the first detected feature, which doesn't contain optical flow speed
-        init_odom = 1;
-        return;
-    }
+//    if (!init_odom)
+//    {
+//      //其实可以不用跳
+//        //skip the first detected feature, which doesn't contain optical flow speed
+//        init_odom = 1;
+//        return;
+//    }
     mBuf.lock();
     odometryBuf.push(_laserOdometry);
     mBuf.unlock();
@@ -342,7 +345,10 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 }
 
 //对imu做积分 把最新状态赋值给最新lidar帧
-void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
+void processIMU(double dt,
+                const Vector3d &linear_acceleration,
+                const Vector3d &angular_velocity,
+                const std_msgs::Header &header)
 {
     if (!first_imu_)
     {
@@ -411,21 +417,6 @@ void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &
 //
 //    pub_predict_odom_.publish(predict_odom_);
 //  }
-}
-
-MatrixXd TangentBasis(Vector3d &g0)
-{
-    Vector3d b, c;
-    Vector3d a = g0.normalized();
-    Vector3d tmp(0, 0, 1);
-    if(a == tmp)
-        tmp << 1, 0, 0;
-    b = (tmp - a * (a.transpose() * tmp)).normalized();
-    c = a.cross(b);
-    MatrixXd bc(3, 2);
-    bc.block<3, 1>(0, 0) = b;
-    bc.block<3, 1>(0, 1) = c;
-    return bc;
 }
 
 //当前lidar系变换到世界系
@@ -878,18 +869,17 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
 #endif
 
 	PointCloud local_normal;
-
-  //存i到pivot帧的相对位姿
+    //存i到pivot帧的相对位姿
 	vector<Transform> local_transforms;
 	int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
 
 	Twist<double> transform_lb = transform_lb_.cast<double>();
 
-	Eigen::Vector3d Ps_pivot = Ps[pivot_idx];
-	Eigen::Matrix3d Rs_pivot = Rs[pivot_idx];
+	Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
+	Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
 
   //lidar位姿
-	Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+	Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
 	Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 
 	Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
@@ -902,24 +892,24 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
     		PointCloud transformed_cloud_corner, tmp_cloud_corner;
 #endif
     		for (int i = 0; i <= pivot_idx; ++i) {
-    			Eigen::Vector3d Ps_i = Ps[i];
-    			Eigen::Matrix3d Rs_i = Rs[i];
+    			Eigen::Vector3d Ps_i = Ps_[i];
+    			Eigen::Matrix3d Rs_i = Rs_[i];
 
-    			Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
+    			Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
     			Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
 
     			Twist<double> transform_li = Twist<double>(rot_li, pos_li);
           //lidar系 i到pivot相对位姿
     			Eigen::Affine3f transform_pivot_i = (transform_pivot.inverse() * transform_li).cast<float>().transform();
           //i系点云变换到pivot系
-          pcl::transformPointCloud(*(surf_stack_[i]), transformed_cloud_surf, transform_pivot_i);
+                pcl::transformPointCloud(*(surf_stack_[i]), transformed_cloud_surf, transform_pivot_i);
     			tmp_cloud_surf += transformed_cloud_surf;
 
 #ifdef USE_CORNER
     			pcl::transformPointCloud(*(corner_stack_[i]), transformed_cloud_corner, transform_pivot_i);
     			tmp_cloud_corner += transformed_cloud_corner;
 #endif
-			  }
+			}
         //surf_stack_[pivot]存前几帧共同的点云 在滑窗时便于向后传递作为局部地图
     		*(surf_stack_[pivot_idx]) = tmp_cloud_surf;
 #ifdef USE_CORNER
@@ -929,39 +919,37 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
     	}//第一个局部地图初始化完毕
 
     	for (int i = 0; i < estimator_config_.window_size + 1; ++i) {
+      	  Eigen::Vector3d Ps_i = Ps_[i];
+      	  Eigen::Matrix3d Rs_i = Rs_[i];
 
-      	Eigen::Vector3d Ps_i = Ps[i];
-      	Eigen::Matrix3d Rs_i = Rs[i];
+      	  Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
+      	  Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
+          //lidar位姿
+    	  Twist<double> transform_li = Twist<double>(rot_li, pos_li);
+      	  //i到pivot相对位姿
+          Eigen::Affine3f transform_pivot_i = (transform_pivot.inverse() * transform_li).cast<float>().transform();
 
-      	Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
-      	Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
-        //lidar位姿
-    		Twist<double> transform_li = Twist<double>(rot_li, pos_li);
-      	//i到pivot相对位姿
-        Eigen::Affine3f transform_pivot_i = (transform_pivot.inverse() * transform_li).cast<float>().transform();
-
-      	Transform local_transform = transform_pivot_i;
-      	local_transforms.push_back(local_transform);
-
-        //pivot前帧不处理
-      	if (i < pivot_idx) {
+      	  Transform local_transform = transform_pivot_i;
+      	  local_transforms.push_back(local_transform);
+          //pivot前帧不处理
+      	  if (i < pivot_idx) {
         	continue;
-      	}
+      	  }
 
       	PointCloud transformed_cloud_surf, transformed_cloud_corner;
 
       	// NOTE: exclude the latest one 最新帧不处理
       	if (i != estimator_config_.window_size) {
-          //pivot帧放进来
+            //pivot帧放进来
         	if (i == pivot_idx) {
-          	*local_surf_points_ptr_ += *(surf_stack_[i]);
-//	        down_size_filter_surf_.setInputCloud(local_surf_points_ptr_);
-//	        down_size_filter_surf_.filter(transformed_cloud_surf);
-//	        *local_surf_points_ptr_ = transformed_cloud_surf;
+          	  *local_surf_points_ptr_ += *(surf_stack_[i]);
+//	          down_size_filter_surf_.setInputCloud(local_surf_points_ptr_);
+//	          down_size_filter_surf_.filter(transformed_cloud_surf);
+//	          *local_surf_points_ptr_ = transformed_cloud_surf;
 #ifdef USE_CORNER
-          	*local_corner_points_ptr_ += *(corner_stack_[i]);
+          	  *local_corner_points_ptr_ += *(corner_stack_[i]);
 #endif
-          	continue;
+          	  continue;
         	}
 
           //pivot后面的帧变换到pivot系下加入到局部地图点云中
@@ -971,17 +959,17 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
 #endif
         	//endregion
         	for (int p_idx = 0; p_idx < transformed_cloud_surf.size(); ++p_idx) {
-          	transformed_cloud_surf[p_idx].intensity = i;
+          	  transformed_cloud_surf[p_idx].intensity = i;
         	}
         	*local_surf_points_ptr_ += transformed_cloud_surf;
 #ifdef USE_CORNER
         	for (int p_idx = 0; p_idx < transformed_cloud_corner.size(); ++p_idx) {
-          	transformed_cloud_corner[p_idx].intensity = i;
+          	  transformed_cloud_corner[p_idx].intensity = i;
         	}
         	*local_corner_points_ptr_ += transformed_cloud_corner;
 #endif
       	}
-    	}
+      }
 
     	DLOG(INFO) << "local_surf_points_ptr_->size() bef: " << local_surf_points_ptr_->size();
     	down_size_filter_surf_.setInputCloud(local_surf_points_ptr_);
@@ -993,10 +981,10 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
     	down_size_filter_corner_.filter(*local_corner_points_filtered_ptr_);
     	DLOG(INFO) << "local_corner_points_ptr_->size() aft: " << local_corner_points_filtered_ptr_->size();
 #endif
-	}
+	 }
 
-  ROS_DEBUG_STREAM("t_build_map cost: " << t_build_map.Toc() << " ms");
-  DLOG(INFO) << "t_build_map cost: " << t_build_map.Toc() << " ms";
+  ROS_DEBUG_STREAM("t_build_map cost: " << t_build_map.toc() << " ms");
+  DLOG(INFO) << "t_build_map cost: " << t_build_map.toc() << " ms";
 
   pcl::KdTreeFLANN<PointT>::Ptr kdtree_surf_from_map(new pcl::KdTreeFLANN<PointT>());
   kdtree_surf_from_map->setInputCloud(local_surf_points_filtered_ptr_);
@@ -1048,7 +1036,7 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
     feature_per_frame.features.assign(make_move_iterator(features.begin()), make_move_iterator(features.end()));
     feature_frames.push_back(std::move(feature_per_frame));
 
-    ROS_DEBUG_STREAM("feature cost: " << t_features.Toc() << " ms");
+    ROS_DEBUG_STREAM("feature cost: " << t_features.toc() << " ms");
   }
 
 }
@@ -1061,7 +1049,7 @@ void VectorToDouble() {
     para_pose_[i][0] = Ps_[opt_i].x();
     para_pose_[i][1] = Ps_[opt_i].y();
     para_pose_[i][2] = Ps_[opt_i].z();
-    Quaterniond q{Rs_[opt_i]};
+    Eigen::Quaterniond q{Rs_[opt_i]};
     para_pose_[i][3] = q.x();
     para_pose_[i][4] = q.y();
     para_pose_[i][5] = q.z();
@@ -1101,7 +1089,7 @@ void DoubleToVector() {
   Vector3d origin_P0 = Ps_[pivot_idx];
   Vector3d origin_R0 = R2ypr(Rs_[pivot_idx]);
 
-  Vector3d origin_R00 = R2ypr(Quaterniond(para_pose_[0][6],
+  Vector3d origin_R00 = R2ypr(Eigen::Quaterniond(para_pose_[0][6],
                                           para_pose_[0][3],
                                           para_pose_[0][4],
                                           para_pose_[0][5]).normalized().toRotationMatrix());
@@ -1112,7 +1100,7 @@ void DoubleToVector() {
   Matrix3d rot_diff = ypr2R(Vector3d(y_diff, 0, 0));
   if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0) {
     ROS_DEBUG("euler singular point!");
-    rot_diff = Rs_[pivot_idx] * Quaterniond(para_pose_[0][6],
+    rot_diff = Rs_[pivot_idx] * Eigen::Quaterniond(para_pose_[0][6],
                                             para_pose_[0][3],
                                             para_pose_[0][4],
                                             para_pose_[0][5]).normalized().toRotationMatrix().transpose();
@@ -1125,7 +1113,7 @@ void DoubleToVector() {
     Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
     Twist<double> trans_pivot{Eigen::Quaterniond{Rs_pivot}, Ps_pivot};
 
-    Matrix3d R_opt_pivot = rot_diff * Quaterniond(para_pose_[0][6],
+    Matrix3d R_opt_pivot = rot_diff * Eigen::Quaterniond(para_pose_[0][6],
                                                   para_pose_[0][3],
                                                   para_pose_[0][4],
                                                   para_pose_[0][5]).normalized().toRotationMatrix();
@@ -1150,7 +1138,7 @@ void DoubleToVector() {
   for (i = 0, opt_i = pivot_idx; i < estimator_config_.opt_window_size + 1; ++i, ++opt_i) {
 //    DLOG(INFO) << "para aft: " << Vector3d(para_pose_[i][0], para_pose_[i][1], para_pose_[i][2]).transpose();
 
-    Rs_[opt_i] = rot_diff * Quaterniond(para_pose_[i][6],
+    Rs_[opt_i] = rot_diff * Eigen::Quaterniond(para_pose_[i][6],
                                         para_pose_[i][3],
                                         para_pose_[i][4],
                                         para_pose_[i][5]).normalized().toRotationMatrix();
@@ -1171,20 +1159,19 @@ void DoubleToVector() {
                            para_speed_bias_[i][7],
                            para_speed_bias_[i][8]);
   }
-//  {
-//    transform_lb_.pos = Vector3d(para_ex_pose_[0],
-//                                 para_ex_pose_[1],
-//                                 para_ex_pose_[2]).template cast<float>();
-//    transform_lb_.rot = Quaterniond(para_ex_pose_[6],
-//                                    para_ex_pose_[3],
-//                                    para_ex_pose_[4],
-//                                    para_ex_pose_[5]).template cast<float>();
-//  }
+  {
+    transform_lb_.pos = Vector3d(para_ex_pose_[0],
+                                 para_ex_pose_[1],
+                                 para_ex_pose_[2]).template cast<float>();
+    transform_lb_.rot = Eigen::Quaterniond(para_ex_pose_[6],
+                                    para_ex_pose_[3],
+                                    para_ex_pose_[4],
+                                    para_ex_pose_[5]).template cast<float>();
+  }
 }
 
 //优化核心部分 ceres实现滑窗优化
-void SolveOptimization()
-{
+void SolveOptimization() {
     if (cir_buf_count_ < estimator_config_.window_size && estimator_config_.imu_factor) {
     	LOG(ERROR) << "enter optimization before enough count: " << cir_buf_count_ << " < "
                	<< estimator_config_.window_size;
@@ -1219,8 +1206,8 @@ void SolveOptimization()
   	for (int i = 0; i < estimator_config_.opt_window_size + 1;
     	   ++i) {
     	ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
-    	problem.AddParameterBlock(para_pose_[i], SIZE_POSE, local_parameterization);
-    	problem.AddParameterBlock(para_speed_bias_[i], SIZE_SPEED_BIAS);
+    	problem.AddParameterBlock(para_pose_[i], leio::SIZE_POSE, local_parameterization);
+    	problem.AddParameterBlock(para_speed_bias_[i], leio::SIZE_SPEED_BIAS);
     	para_ids.push_back(para_pose_[i]);
     	para_ids.push_back(para_speed_bias_[i]);
   	}
@@ -1235,7 +1222,7 @@ void SolveOptimization()
   if (estimator_config_.marginalization_factor) {
     if (last_marginalization_info) {
       // construct new marginlization_factor
-      MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
+      leio::MarginalizationFactor *marginalization_factor = new leio::MarginalizationFactor(last_marginalization_info);
       res_id_marg = problem.AddResidualBlock(marginalization_factor, NULL,
                                              last_marginalization_parameter_blocks);
       res_ids_marg.push_back(res_id_marg);
@@ -1255,7 +1242,7 @@ void SolveOptimization()
         continue;
       }
 
-      ImuFactor *f = new ImuFactor(pre_integrations_[opt_j]);
+      leio::ImuFactor *f = new leio::ImuFactor(pre_integrations_[opt_j]);
       ceres::internal::ResidualBlock *res_id =
           problem.AddResidualBlock(f,
                                    NULL,
@@ -1270,7 +1257,6 @@ void SolveOptimization()
   }
 
   //点云几何关系约束 点面残差 点线残差
-  //todo 这里原版好像没用上
   vector<ceres::internal::ResidualBlock *> res_ids_proj;
   if (estimator_config_.point_distance_factor) {
     for (int i = 0; i < estimator_config_.opt_window_size + 1; ++i) {
@@ -1309,9 +1295,8 @@ void SolveOptimization()
 //          res_ids_proj.push_back(res_id);
         } else {
           //todo 这里需要改一下 不估计外参 外参要传进去 但不需要修改
-          PivotPointPlaneFactor *f = new PivotPointPlaneFactor(p_eigen,
-                                                               coeff_eigen,
-                                                               transform_lb_);
+          leio::PivotPointPlaneFactor *f = new leio::PivotPointPlaneFactor(p_eigen,
+                                                               coeff_eigen);
           ceres::internal::ResidualBlock *res_id =
               problem.AddResidualBlock(f,
                                        loss_function,
@@ -1334,11 +1319,11 @@ void SolveOptimization()
     }
   }
 
-//todo 先验因子要添加一下
+  //todo 这里不想加 不想优化外参 这个先验尝试让外参不变
   if (estimator_config_.prior_factor) {
     {
       Twist<double> trans_tmp = transform_lb_.cast<double>();
-      PriorFactor *f = new PriorFactor(trans_tmp.pos, trans_tmp.rot);
+      leio::PriorFactor *f = new leio::PriorFactor(trans_tmp.pos, trans_tmp.rot);
       problem.AddResidualBlock(f,
                                NULL,
                                para_ex_pose_);
@@ -1432,8 +1417,8 @@ void SolveOptimization()
   ceres::Solve(options, &problem, &summary);
   DLOG(INFO) << summary.BriefReport();
 
-  ROS_DEBUG_STREAM("t_opt: " << t_opt.Toc() << " ms");
-  DLOG(INFO) <<"t_opt: " << t_opt.Toc() << " ms";
+  ROS_DEBUG_STREAM("t_opt: " << t_opt.toc() << " ms");
+  DLOG(INFO) <<"t_opt: " << t_opt.toc() << " ms";
 
   DoubleToVector();
 
@@ -1443,7 +1428,7 @@ void SolveOptimization()
 
     TicToc t_whole_marginalization;
 
-    MarginalizationInfo *marginalization_info = new MarginalizationInfo();
+    leio::MarginalizationInfo *marginalization_info = new leio::MarginalizationInfo();
 
     VectorToDouble();
 
@@ -1455,8 +1440,8 @@ void SolveOptimization()
           drop_set.push_back(i);
       }
       // construct new marginlization_factor
-      MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
-      ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(marginalization_factor, NULL,
+      leio::MarginalizationFactor *marginalization_factor = new leio::MarginalizationFactor(last_marginalization_info);
+      leio::ResidualBlockInfo *residual_block_info = new leio::ResidualBlockInfo(marginalization_factor, NULL,
                                                                      last_marginalization_parameter_blocks,
                                                                      drop_set);
 
@@ -1466,8 +1451,8 @@ void SolveOptimization()
     if (estimator_config_.imu_factor) {
       int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
       if (pre_integrations_[pivot_idx + 1]->sum_dt_ < 10.0) {
-        ImuFactor *imu_factor_ = new ImuFactor(pre_integrations_[pivot_idx + 1]);
-        ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(imu_factor_, NULL,
+        leio::ImuFactor *imu_factor_ = new leio::ImuFactor(pre_integrations_[pivot_idx + 1]);
+        leio::ResidualBlockInfo *residual_block_info = new leio::ResidualBlockInfo(imu_factor_, NULL,
                                                                        vector<double *>{para_pose_[0],
                                                                                         para_speed_bias_[0],
                                                                                         para_pose_[1],
@@ -1498,11 +1483,10 @@ void SolveOptimization()
           const Eigen::Vector3d &p_eigen = feature_j.point;
           const Eigen::Vector4d &coeff_eigen = feature_j.coeffs;
 
-          PivotPointPlaneFactor *pivot_point_plane_factor = new PivotPointPlaneFactor(p_eigen,
-                                                                                      coeff_eigen,
-                                                                                      transform_lb_);
+          leio::PivotPointPlaneFactor *pivot_point_plane_factor = new leio::PivotPointPlaneFactor(p_eigen,
+                                                                                      coeff_eigen);
 
-          ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(pivot_point_plane_factor, loss_function,
+          leio::ResidualBlockInfo *residual_block_info = new leio::ResidualBlockInfo(pivot_point_plane_factor, loss_function,
                                                                          vector<double *>{para_pose_[0],
                                                                                           para_pose_[i],
                                                                                           para_ex_pose_},
@@ -1516,13 +1500,13 @@ void SolveOptimization()
 
     TicToc t_pre_margin;
     marginalization_info->PreMarginalize();
-    ROS_DEBUG("pre marginalization %f ms", t_pre_margin.Toc());
-    ROS_DEBUG_STREAM("pre marginalization: " << t_pre_margin.Toc() << " ms");
+    ROS_DEBUG("pre marginalization %f ms", t_pre_margin.toc());
+    ROS_DEBUG_STREAM("pre marginalization: " << t_pre_margin.toc() << " ms");
 
     TicToc t_margin;
     marginalization_info->Marginalize();
-    ROS_DEBUG("marginalization %f ms", t_margin.Toc());
-    ROS_DEBUG_STREAM("marginalization: " << t_margin.Toc() << " ms");
+    ROS_DEBUG("marginalization %f ms", t_margin.toc());
+    ROS_DEBUG_STREAM("marginalization: " << t_margin.toc() << " ms");
 
     std::unordered_map<long, double *> addr_shift;
     for (int i = 1; i < estimator_config_.opt_window_size + 1; ++i) {
@@ -1540,8 +1524,8 @@ void SolveOptimization()
     last_marginalization_info = marginalization_info;
     last_marginalization_parameter_blocks = parameter_blocks;
 
-    DLOG(INFO) << "whole marginalization costs: " << t_whole_marginalization.Toc();
-    ROS_DEBUG_STREAM("whole marginalization costs: " << t_whole_marginalization.Toc() << " ms");
+    DLOG(INFO) << "whole marginalization costs: " << t_whole_marginalization.toc();
+    ROS_DEBUG_STREAM("whole marginalization costs: " << t_whole_marginalization.toc() << " ms");
   }//边缘化结束
   //endregion
 
@@ -1552,7 +1536,7 @@ void SolveOptimization()
 //    Twist<double> transform_lb = transform_lb_.cast<double>();
 //    Transform &opt_l0_transform = opt_transforms_[0];
 //    int opt_0 = int(estimator_config_.window_size - estimator_config_.opt_window_size + 0);
-//    Quaterniond rot_l0(Rs_[opt_0] * transform_lb.rot.conjugate().normalized());
+//    Eigen::Quaterniond rot_l0(Rs_[opt_0] * transform_lb.rot.conjugate().normalized());
 //    Eigen::Vector3d pos_l0 = Ps_[opt_0] - rot_l0 * transform_lb.pos;
 //    opt_l0_transform = Twist<double>{rot_l0, pos_l0}.cast<float>(); // for updating the map
 
@@ -1561,7 +1545,7 @@ void SolveOptimization()
 //    for (int i = 0; i < estimator_config_.opt_window_size + 1; ++i) {
 //      int opt_i = int(estimator_config_.window_size - estimator_config_.opt_window_size + i);
 
-//      Quaterniond rot_li(Rs_[opt_i] * transform_lb.rot.conjugate().normalized());
+//      Eigen::Quaterniond rot_li(Rs_[opt_i] * transform_lb.rot.conjugate().normalized());
 //      Eigen::Vector3d pos_li = Ps_[opt_i] - rot_li * transform_lb.pos;
 //      Twist<double> transform_li = Twist<double>(rot_li, pos_li);
 
@@ -1593,7 +1577,7 @@ void SolveOptimization()
 //      Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
 //      Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
 
-//      Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+//      Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
 //      Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 //      PublishCloudMsg(pub_local_surf_points_,
 //                      *surf_stack_[pivot_idx + 1],
@@ -1630,10 +1614,10 @@ void SolveOptimization()
 //      Eigen::Vector3d Ps_last = Ps_.last();
 //      Eigen::Matrix3d Rs_last = Rs_.last();
 
-//      Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
+//      Eigen::Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
 //      Eigen::Vector3d pos_last = Ps_last - rot_last * transform_lb.pos;
 
-//      Quaterniond rot_predict = (rot_pivot.inverse() * rot_last).normalized();
+//      Eigen::Quaterniond rot_predict = (rot_pivot.inverse() * rot_last).normalized();
 //      Eigen::Vector3d pos_predict = rot_pivot.inverse() * (Ps_last - Ps_pivot);
 
 //      PublishCloudMsg(pub_predict_surf_points_, *(surf_stack_.last()), Headers_.last().stamp, "/laser_predict");
@@ -1668,13 +1652,12 @@ void SolveOptimization()
 
 //  }
 
-  DLOG(INFO) << "tic_toc_opt: " << tic_toc_opt.Toc() << " ms";
-  ROS_DEBUG_STREAM("tic_toc_opt: " << tic_toc_opt.Toc() << " ms");
+  DLOG(INFO) << "tic_toc_opt: " << tic_toc_opt.toc() << " ms";
+  ROS_DEBUG_STREAM("tic_toc_opt: " << tic_toc_opt.toc() << " ms");
 }
 
 //滑窗
 void SlideWindow() { // NOTE: this function is only for the states and the local map
-
   {
     if (init_local_map_) {
       int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
@@ -1684,7 +1667,7 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
       Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
 
-      Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+      Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
       Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 
       Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
@@ -1698,7 +1681,7 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       Eigen::Vector3d Ps_i = Ps_[i];
       Eigen::Matrix3d Rs_i = Rs_[i];
 
-      Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
+      Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
       Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
 
       Twist<double> transform_li = Twist<double>(rot_li, pos_li);
@@ -1737,7 +1720,6 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       *(corner_stack_[i]) = filtered_corner_points;
 #endif
     }
-
   }
 
   dt_buf_.push(vector<double>());
@@ -1759,14 +1741,13 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
 //  all_laser_transforms_.push(all_laser_transforms_[cir_buf_count_]);
 
 // TODO: slide new lidar points
-
 }
 
 bool RunInitialization() {
   // NOTE: check IMU observibility, adapted from VINS-mono
   //计算滑窗内IMU平均加速度和方差 防止方差过小 代表IMU激励不充分
   {
-    PairTimeLaserTransform laser_trans_i, laser_trans_j;
+    leio::PairTimeLaserTransform laser_trans_i, laser_trans_j;
     Vector3d sum_g;
 
     for (size_t i = 0; i < estimator_config_.window_size;
@@ -1802,7 +1783,7 @@ bool RunInitialization() {
 
   Eigen::Vector3d g_vec_in_laser;
   bool init_result
-      = ImuInitializer::Initialization(all_laser_transforms_, Vs_, Bas_, Bgs_, g_vec_in_laser, transform_lb_, R_WI_);
+      = leio::ImuInitializer::Initialization(all_laser_transforms_, Vs_, Bas_, Bgs_, g_vec_in_laser, transform_lb_, R_WI_);
 //  init_result = false;
 
 //  Q_WI_ = R_WI_;
@@ -1854,6 +1835,117 @@ void SetInitFlag(bool set_init) {
   imu_inited_ = set_init;
 }
 
+size_t ToIndex(int i, int j, int k) {
+  return i + laser_cloud_length_ * j + laser_cloud_length_ * laser_cloud_width_ * k;
+}
+
+void FromIndex(const size_t &index, int &i, int &j, int &k) {
+  int residual = index % (laser_cloud_length_ * laser_cloud_width_);
+  k = index / (laser_cloud_length_ * laser_cloud_width_);
+  j = residual / laser_cloud_length_;
+  i = residual % laser_cloud_length_;
+}
+
+void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
+                                     PointCloudPtr margin_surf_stack_downsampled,
+                                     std::vector<size_t> margin_valid_idx,
+                                     const Transform &margin_transform_tobe_mapped,
+                                     const CubeCenter &margin_cube_center) {
+
+  PointT point_sel;
+  size_t margin_corner_stack_ds_size = margin_corner_stack_downsampled->points.size();
+  size_t margin_surf_stack_ds_size = margin_surf_stack_downsampled->points.size();
+  size_t margin_valid_size = margin_valid_idx.size();
+
+  for (int i = 0; i < margin_corner_stack_ds_size; ++i) {
+    //转到世界系
+    PointAssociateToMap(margin_corner_stack_downsampled->points[i], point_sel, margin_transform_tobe_mapped);
+
+    int cube_i = int((point_sel.x + 25.0) / 50.0) + laser_cloud_cen_length_;
+    int cube_j = int((point_sel.y + 25.0) / 50.0) + laser_cloud_cen_width_;
+    int cube_k = int((point_sel.z + 25.0) / 50.0) + laser_cloud_cen_height_;
+
+    if (point_sel.x + 25.0 < 0) --cube_i;
+    if (point_sel.y + 25.0 < 0) --cube_j;
+    if (point_sel.z + 25.0 < 0) --cube_k;
+
+    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
+        cube_j >= 0 && cube_j < laser_cloud_width_ &&
+        cube_k >= 0 && cube_k < laser_cloud_height_) {
+      size_t cube_idx = ToIndex(cube_i, cube_j, cube_k);
+      //todo 需要确认一下一开始存入的逻辑是否正确
+      laser_cloud_corner_array_[cube_idx]->push_back(point_sel);
+    }
+  }
+
+  // store down sized surface stack points in corresponding cube clouds
+  for (int i = 0; i < margin_surf_stack_ds_size; ++i) {
+    PointAssociateToMap(margin_surf_stack_downsampled->points[i], point_sel, margin_transform_tobe_mapped);
+
+    int cube_i = int((point_sel.x + 25.0) / 50.0) + laser_cloud_cen_length_;
+    int cube_j = int((point_sel.y + 25.0) / 50.0) + laser_cloud_cen_width_;
+    int cube_k = int((point_sel.z + 25.0) / 50.0) + laser_cloud_cen_height_;
+
+    if (point_sel.x + 25.0 < 0) --cube_i;
+    if (point_sel.y + 25.0 < 0) --cube_j;
+    if (point_sel.z + 25.0 < 0) --cube_k;
+
+    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
+        cube_j >= 0 && cube_j < laser_cloud_width_ &&
+        cube_k >= 0 && cube_k < laser_cloud_height_) {
+      size_t cube_idx = ToIndex(cube_i, cube_j, cube_k);
+      laser_cloud_surf_array_[cube_idx]->push_back(point_sel);
+    }
+  }
+
+  // TODO: varlidate margin_valid_idx
+  // down size all valid (within field of view) feature cube clouds
+  for (int i = 0; i < margin_valid_size; ++i) {
+    size_t index = margin_valid_idx[i];
+
+//    DLOG(INFO) << "index before: " << index;
+
+    int last_i, last_j, last_k;
+
+    FromIndex(index, last_i, last_j, last_k);
+
+    float center_x = 50.0f * (last_i - margin_cube_center.laser_cloud_cen_length);
+    float center_y = 50.0f * (last_j - margin_cube_center.laser_cloud_cen_width);
+    float center_z = 50.0f * (last_k - margin_cube_center.laser_cloud_cen_height); // NOTE: center of the margin cube
+
+    int cube_i = int((center_x + 25.0) / 50.0) + laser_cloud_cen_length_;
+    int cube_j = int((center_y + 25.0) / 50.0) + laser_cloud_cen_width_;
+    int cube_k = int((center_z + 25.0) / 50.0) + laser_cloud_cen_height_;
+
+    if (center_x + 25.0 < 0) --cube_i;
+    if (center_y + 25.0 < 0) --cube_j;
+    if (center_z + 25.0 < 0) --cube_k;
+
+    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
+        cube_j >= 0 && cube_j < laser_cloud_width_ &&
+        cube_k >= 0 && cube_k < laser_cloud_height_) {
+
+      index = ToIndex(cube_i, cube_j, cube_k); // NOTE: update to current index
+
+//      DLOG(INFO) << "index after: " << index;
+
+      laser_cloud_corner_downsampled_array_[index]->clear();
+      down_size_filter_corner_.setInputCloud(laser_cloud_corner_array_[index]);
+      down_size_filter_corner_.filter(*laser_cloud_corner_downsampled_array_[index]);
+
+      laser_cloud_surf_downsampled_array_[index]->clear();
+      down_size_filter_surf_.setInputCloud(laser_cloud_surf_array_[index]);
+      down_size_filter_surf_.filter(*laser_cloud_surf_downsampled_array_[index]);
+
+      // swap cube clouds for next processing
+      laser_cloud_corner_array_[index].swap(laser_cloud_corner_downsampled_array_[index]);
+      laser_cloud_surf_array_[index].swap(laser_cloud_surf_downsampled_array_[index]);
+    }
+
+  }
+
+}
+
 //处理完lidar_info消息后做LIO
 void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &header) {
 
@@ -1871,14 +1963,14 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   // TODO: LaserFrame Object
   // LaserFrame laser_frame(laser, header.stamp.toSec());
 
-  LaserTransform laser_transform(header.stamp.toSec(), transform_in);
+  leio::LaserTransform laser_transform(header.stamp.toSec(), transform_in);
 
   laser_transform.pre_integration = tmp_pre_integration_;
   pre_integrations_.push(tmp_pre_integration_);
 
   // reset tmp_pre_integration_
   tmp_pre_integration_.reset();
-  tmp_pre_integration_ = std::make_shared<IntegrationBase>(IntegrationBase(acc_last_,
+  tmp_pre_integration_ = std::make_shared<leio::IntegrationBase>(leio::IntegrationBase(acc_last_,
                                                                            gyr_last_,
                                                                            Bas_[cir_buf_count_],
                                                                            Bgs_[cir_buf_count_],
@@ -1964,7 +2056,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
             }
           }
 
-          // DLOG(INFO) << "initialization time: " << tic_toc_.Toc() << " ms";
+          // DLOG(INFO) << "initialization time: " << tic_toc_.toc() << " ms";
 
           if (init_result) {
             stage_flag_ = INITED;
@@ -1990,7 +2082,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
                  ++i) {
               Twist<double> transform_lb = transform_lb_.cast<double>();
               //lidar位姿
-              Quaterniond Rs_li(Rs_[i] * transform_lb.rot.inverse());
+              Eigen::Quaterniond Rs_li(Rs_[i] * transform_lb.rot.inverse());
               Eigen::Vector3d Ps_li = Ps_[i] - Rs_li * transform_lb.pos;
 
               Twist<double> trans_li{Rs_li, Ps_li};
@@ -2014,7 +2106,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
                  ++i) {
               Twist<double> transform_lb = transform_lb_.cast<double>();
 
-              Quaterniond Rs_li(Rs_[i] * transform_lb.rot.inverse());
+              Eigen::Quaterniond Rs_li(Rs_[i] * transform_lb.rot.inverse());
               Eigen::Vector3d Ps_li = Ps_[i] - Rs_li * transform_lb.pos;
 
               Twist<double> trans_li{Rs_li, Ps_li};
@@ -2075,7 +2167,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //          Twist<double> transform_lb = transform_lb_.cast<double>();
 //          Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
 //          Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
-//          Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+//          Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
 //          Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 //          Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
 //          local_odom_.pose.pose.orientation.x = transform_pivot.rot.x();
@@ -2091,7 +2183,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //          laser_odom_.header.seq += 1;
 //          Eigen::Vector3d Ps_last = Ps_.last();
 //          Eigen::Matrix3d Rs_last = Rs_.last();
-//          Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
+//          Eigen::Quaterniond rot_last(Rs_last * transform_lb.rot.inverse());
 //          Eigen::Vector3d pos_last = Ps_last - rot_last * transform_lb.pos;
 //          Twist<double> transform_last = Twist<double>(rot_last, pos_last);
 //          laser_odom_.pose.pose.orientation.x = transform_last.rot.x();
@@ -2159,13 +2251,13 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
 
   //位姿取出来
   {
-    transform_sum_.pos.x() = lidar_info.laser_odometry_.pose.pose.position.x;
-    transform_sum_.pos.y() = lidar_info.laser_odometry_.pose.pose.position.y;
-    transform_sum_.pos.z() = lidar_info.laser_odometry_.pose.pose.position.z;
-    transform_sum_.rot.x() = lidar_info.laser_odometry_.pose.pose.orientation.x;
-    transform_sum_.rot.y() = lidar_info.laser_odometry_.pose.pose.orientation.y;
-    transform_sum_.rot.z() = lidar_info.laser_odometry_.pose.pose.orientation.z;
-    transform_sum_.rot.w() = lidar_info.laser_odometry_.pose.pose.orientation.w;
+    transform_sum_.pos.x() = lidar_info.laser_odometry_->pose.pose.position.x;
+    transform_sum_.pos.y() = lidar_info.laser_odometry_->pose.pose.position.y;
+    transform_sum_.pos.z() = lidar_info.laser_odometry_->pose.pose.position.z;
+    transform_sum_.rot.x() = lidar_info.laser_odometry_->pose.pose.orientation.x;
+    transform_sum_.rot.y() = lidar_info.laser_odometry_->pose.pose.orientation.y;
+    transform_sum_.rot.z() = lidar_info.laser_odometry_->pose.pose.orientation.z;
+    transform_sum_.rot.w() = lidar_info.laser_odometry_->pose.pose.orientation.w;
   }
 
   //点云取出来
@@ -2175,22 +2267,22 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
     full_cloud_->clear();
 
     // 将 ROS 消息转换为 PCL 点云
-    pcl::fromROSMsg(lidar_info.surf_cloud_, *laser_cloud_surf_last_);
-    pcl::fromROSMsg(lidar_info.edge_cloud_, *laser_cloud_corner_last_);
+    pcl::fromROSMsg(*lidar_info.surf_cloud_, *laser_cloud_surf_last_);
+    pcl::fromROSMsg(*lidar_info.edge_cloud_, *laser_cloud_corner_last_);
     //todo 没加full_cloud_
   }
 
-  time_laser_cloud_corner_last_ = lidar_info.laser_odometry_.header.stamp;
-  time_laser_cloud_surf_last_ = lidar_info.laser_odometry_.header.stamp;
-  time_laser_full_cloud_ = lidar_info.laser_odometry_.header.stamp;
-  time_laser_odometry_ = lidar_info.laser_odometry_.header.stamp;
+  time_laser_cloud_corner_last_ = lidar_info.laser_odometry_->header.stamp;
+  time_laser_cloud_surf_last_ = lidar_info.laser_odometry_->header.stamp;
+  time_laser_full_cloud_ = lidar_info.laser_odometry_->header.stamp;
+  time_laser_odometry_ = lidar_info.laser_odometry_->header.stamp;
 
   new_laser_cloud_corner_last_ = true;
   new_laser_cloud_surf_last_ = true;
   new_laser_full_cloud_ = true;
   new_laser_odometry_ = true;
 
-  DLOG(INFO) << "decode lidar_info time: " << tic_toc_decoder.Toc() << " ms";
+  DLOG(INFO) << "decode lidar_info time: " << tic_toc_decoder.toc() << " ms";
 }
 
 void TransformAssociateToMap() {
@@ -2653,16 +2745,7 @@ void OptimizeTransformTobeMapped() {
   }
 }
 
-size_t ToIndex(int i, int j, int k) const {
-  return i + laser_cloud_length_ * j + laser_cloud_length_ * laser_cloud_width_ * k;
-}
 
-void FromIndex(const size_t &index, int &i, int &j, int &k) {
-  int residual = index % (laser_cloud_length_ * laser_cloud_width_);
-  k = index / (laser_cloud_length_ * laser_cloud_width_);
-  j = residual / laser_cloud_length_;
-  i = residual % laser_cloud_length_;
-}
 
 // void PublishResults() {
 
@@ -2739,106 +2822,6 @@ void FromIndex(const size_t &index, int &i, int &j, int &k) {
 //                                           transform_aft_mapped_.pos.z()));
 //   tf_broadcaster_.sendTransform(aft_mapped_trans_);
 // }
-
-void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
-                                     PointCloudPtr margin_surf_stack_downsampled,
-                                     std::vector<size_t> margin_valid_idx,
-                                     const Transform &margin_transform_tobe_mapped,
-                                     const CubeCenter &margin_cube_center) {
-
-  PointT point_sel;
-  size_t margin_corner_stack_ds_size = margin_corner_stack_downsampled->points.size();
-  size_t margin_surf_stack_ds_size = margin_surf_stack_downsampled->points.size();
-  size_t margin_valid_size = margin_valid_idx.size();
-
-  for (int i = 0; i < margin_corner_stack_ds_size; ++i) {
-    //转到世界系
-    PointAssociateToMap(margin_corner_stack_downsampled->points[i], point_sel, margin_transform_tobe_mapped);
-
-    int cube_i = int((point_sel.x + 25.0) / 50.0) + laser_cloud_cen_length_;
-    int cube_j = int((point_sel.y + 25.0) / 50.0) + laser_cloud_cen_width_;
-    int cube_k = int((point_sel.z + 25.0) / 50.0) + laser_cloud_cen_height_;
-
-    if (point_sel.x + 25.0 < 0) --cube_i;
-    if (point_sel.y + 25.0 < 0) --cube_j;
-    if (point_sel.z + 25.0 < 0) --cube_k;
-
-    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
-        cube_j >= 0 && cube_j < laser_cloud_width_ &&
-        cube_k >= 0 && cube_k < laser_cloud_height_) {
-      size_t cube_idx = ToIndex(cube_i, cube_j, cube_k);
-      //todo 需要确认一下一开始存入的逻辑是否正确
-      laser_cloud_corner_array_[cube_idx]->push_back(point_sel);
-    }
-  }
-
-  // store down sized surface stack points in corresponding cube clouds
-  for (int i = 0; i < margin_surf_stack_ds_size; ++i) {
-    PointAssociateToMap(margin_surf_stack_downsampled->points[i], point_sel, margin_transform_tobe_mapped);
-
-    int cube_i = int((point_sel.x + 25.0) / 50.0) + laser_cloud_cen_length_;
-    int cube_j = int((point_sel.y + 25.0) / 50.0) + laser_cloud_cen_width_;
-    int cube_k = int((point_sel.z + 25.0) / 50.0) + laser_cloud_cen_height_;
-
-    if (point_sel.x + 25.0 < 0) --cube_i;
-    if (point_sel.y + 25.0 < 0) --cube_j;
-    if (point_sel.z + 25.0 < 0) --cube_k;
-
-    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
-        cube_j >= 0 && cube_j < laser_cloud_width_ &&
-        cube_k >= 0 && cube_k < laser_cloud_height_) {
-      size_t cube_idx = ToIndex(cube_i, cube_j, cube_k);
-      laser_cloud_surf_array_[cube_idx]->push_back(point_sel);
-    }
-  }
-
-  // TODO: varlidate margin_valid_idx
-  // down size all valid (within field of view) feature cube clouds
-  for (int i = 0; i < margin_valid_size; ++i) {
-    size_t index = margin_valid_idx[i];
-
-//    DLOG(INFO) << "index before: " << index;
-
-    int last_i, last_j, last_k;
-
-    FromIndex(index, last_i, last_j, last_k);
-
-    float center_x = 50.0f * (last_i - margin_cube_center.laser_cloud_cen_length);
-    float center_y = 50.0f * (last_j - margin_cube_center.laser_cloud_cen_width);
-    float center_z = 50.0f * (last_k - margin_cube_center.laser_cloud_cen_height); // NOTE: center of the margin cube
-
-    int cube_i = int((center_x + 25.0) / 50.0) + laser_cloud_cen_length_;
-    int cube_j = int((center_y + 25.0) / 50.0) + laser_cloud_cen_width_;
-    int cube_k = int((center_z + 25.0) / 50.0) + laser_cloud_cen_height_;
-
-    if (center_x + 25.0 < 0) --cube_i;
-    if (center_y + 25.0 < 0) --cube_j;
-    if (center_z + 25.0 < 0) --cube_k;
-
-    if (cube_i >= 0 && cube_i < laser_cloud_length_ &&
-        cube_j >= 0 && cube_j < laser_cloud_width_ &&
-        cube_k >= 0 && cube_k < laser_cloud_height_) {
-
-      index = ToIndex(cube_i, cube_j, cube_k); // NOTE: update to current index
-
-//      DLOG(INFO) << "index after: " << index;
-
-      laser_cloud_corner_downsampled_array_[index]->clear();
-      down_size_filter_corner_.setInputCloud(laser_cloud_corner_array_[index]);
-      down_size_filter_corner_.filter(*laser_cloud_corner_downsampled_array_[index]);
-
-      laser_cloud_surf_downsampled_array_[index]->clear();
-      down_size_filter_surf_.setInputCloud(laser_cloud_surf_array_[index]);
-      down_size_filter_surf_.filter(*laser_cloud_surf_downsampled_array_[index]);
-
-      // swap cube clouds for next processing
-      laser_cloud_corner_array_[index].swap(laser_cloud_corner_downsampled_array_[index]);
-      laser_cloud_surf_array_[index].swap(laser_cloud_surf_downsampled_array_[index]);
-    }
-
-  }
-
-}
 
 void Process() {
   if (!HasNewData()) {
@@ -3130,7 +3113,7 @@ void Process() {
     //todo 实验再加
     // PublishResults();
   }
-  // DLOG(INFO) << "mapping: " << tic_toc_.Toc() << " ms";
+  // DLOG(INFO) << "mapping: " << tic_toc_.toc() << " ms";
 }
 
 // lio-mapping 版本
@@ -3186,24 +3169,22 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
 //  }
 }
 
-//todo 根据需求修改
 void SurfHandler(const sensor_msgs::PointCloud2ConstPtr &_laserSurf)
 {
     mBuf.lock();
-    surfBuf.push(_laserOdometry);
-    mBuf.unlock();
-    con.notify_one();
-}
-//todo 根据需求修改
-void EdgeHandler(const sensor_msgs::PointCloud2ConstPtr &_laserEdge)
-{
-    mBuf.lock();
-    edgeBuf.push(_laserOdometry);
+    surfBuf.push(_laserSurf);
     mBuf.unlock();
     con.notify_one();
 }
 
-////todo 根据需求修改
+void EdgeHandler(const sensor_msgs::PointCloud2ConstPtr &_laserEdge)
+{
+    mBuf.lock();
+    edgeBuf.push(_laserEdge);
+    mBuf.unlock();
+    con.notify_one();
+}
+
 //void pubPath_lio( void )
 //{
 //    std::cout << "mark pubPath_lio" << std::endl;
@@ -3405,7 +3386,7 @@ void process_lio()
                 {
                   //todo vins中有update()会更新current_time
                     if (curr_time_ < 0)
-                        curr_time_ = t;
+                        curr_time_ = imu_time;
                     double dt = imu_time - curr_time_;
                     ROS_ASSERT(dt >= 0);
                     curr_time_ = imu_time;
@@ -3468,6 +3449,65 @@ void process_lio()
 	}
 } // process_lio
 
+void ClearState() {
+  // TODO: CirclarBuffer should have clear method
+  for (size_t i = 0; i < estimator_config_.window_size + 1;
+       ++i) {
+    Rs_[i].setIdentity();
+    Ps_[i].setZero();
+    Vs_[i].setZero();
+    Bas_[i].setZero();
+    Bgs_[i].setZero();
+    dt_buf_[i].clear();
+    linear_acceleration_buf_[i].clear();
+    angular_velocity_buf_[i].clear();
+
+    surf_stack_[i].reset();
+    corner_stack_[i].reset();
+    full_stack_[i].reset();
+    size_surf_stack_[i] = 0;
+    size_corner_stack_[i] = 0;
+    init_local_map_ = false;
+
+    if (pre_integrations_[i] != nullptr) {
+      pre_integrations_[i].reset();
+    }
+  }
+
+  for (size_t i = 0; i < estimator_config_.opt_window_size + 1;
+       ++i) {
+//    opt_point_coeff_mask_[i] = false;
+//    opt_cube_centers_[i];
+//    opt_valid_idx_[i];
+    opt_point_coeff_map_[i].clear();
+    opt_corner_stack_[i].reset();
+    opt_surf_stack_[i].reset();
+  }
+
+  stage_flag_ = NOT_INITED;
+  first_imu_ = false;
+  cir_buf_count_ = 0;
+
+  //acc_last_初值给多少 这里无所谓 processlaserodom会reset
+  tmp_pre_integration_.reset();
+  tmp_pre_integration_ = std::make_shared<leio::IntegrationBase>(leio::IntegrationBase(acc_last_,
+                                                                           gyr_last_,
+                                                                           Bas_[cir_buf_count_],
+                                                                           Bgs_[cir_buf_count_],
+                                                                           estimator_config_.pim_config));
+
+  // TODO: make shared?
+  last_marginalization_info = nullptr;
+
+  R_WI_.setIdentity();
+  Q_WI_ = R_WI_;
+
+  // WARNING: g_norm should be set before clear
+  g_norm_ = tmp_pre_integration_->config_.g_norm;
+
+  convergence_flag_ = false;
+}
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "laserPGO");
@@ -3477,6 +3517,32 @@ int main(int argc, char **argv)
     down_size_filter_corner_.setLeafSize(estimator_config_.corner_filter_size, estimator_config_.corner_filter_size, estimator_config_.corner_filter_size);
   	down_size_filter_surf_.setLeafSize(estimator_config_.surf_filter_size, estimator_config_.surf_filter_size, estimator_config_.surf_filter_size);
   	down_size_filter_map_.setLeafSize(estimator_config_.map_filter_size, estimator_config_.map_filter_size, estimator_config_.map_filter_size);
+    //imu参数
+    estimator_config_.pim_config.acc_n = imuAccNoise;
+    estimator_config_.pim_config.gyr_n = imuGyrNoise;
+    estimator_config_.pim_config.acc_w = imuAccBiasN;
+    estimator_config_.pim_config.gyr_w = imuGyrBiasN;
+    estimator_config_.pim_config.g_norm = imuGravity;
+    laser_cloud_corner_array_.resize(laser_cloud_num_);
+    laser_cloud_surf_array_.resize(laser_cloud_num_);
+    laser_cloud_corner_downsampled_array_.resize(laser_cloud_num_);
+    laser_cloud_surf_downsampled_array_.resize(laser_cloud_num_);
+    for (size_t i = 0; i < laser_cloud_num_; i++) {
+      laser_cloud_corner_array_[i].reset(new PointCloud());
+      laser_cloud_surf_array_[i].reset(new PointCloud());
+      laser_cloud_corner_downsampled_array_[i].reset(new PointCloud());
+      laser_cloud_surf_downsampled_array_[i].reset(new PointCloud());
+    }
+
+    //lio-mapping中构建estimator的部分
+    para_pose_ = new double *[estimator_config_.opt_window_size + 1];
+    para_speed_bias_ = new double *[estimator_config_.opt_window_size + 1];
+    for (int i = 0; i < estimator_config_.opt_window_size + 1;
+         ++i) {
+      para_pose_[i] = new double[leio::SIZE_POSE];
+      para_speed_bias_[i] = new double[leio::SIZE_SPEED_BIAS];
+    }
+    ClearState();
 
     // --------------------------------- 订阅后端数据 ---------------------------------
 //	 ros::Subscriber subCenters = nh.subscribe<sensor_msgs::PointCloud2>("/Center_BA", 100, centerHandler);
@@ -3490,8 +3556,8 @@ int main(int argc, char **argv)
     ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler, ros::TransportHints().tcpNoDelay());
 
     // ------------------------------------------------------------------
-	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
-	pubPathAftPGO = nh.advertise<nav_msgs::Path>("/aft_pgo_path", 100);
+//	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
+//	pubPathAftPGO = nh.advertise<nav_msgs::Path>("/aft_pgo_path", 100);
 
     //执行后端优化的线程
     std::thread measurement_process{process_lio};

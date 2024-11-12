@@ -30,15 +30,13 @@
 
 #include "factor/PivotPointPlaneFactor.hpp"
 
-//namespace leio {
+namespace leio {
 
 static double sqrt_info_static = 1.0;
 
 PivotPointPlaneFactor::PivotPointPlaneFactor(const Eigen::Vector3d &point,
-                                             const Eigen::Vector4d &coeff,
-                                             const Twist<double> &transform_lb) : point_{point},
-                                                                             coeff_{coeff},
-                                                                             transform_lb_{transform_lb}{
+                                             const Eigen::Vector4d &coeff) : point_{point},
+                                                                             coeff_{coeff}{
 /// add new point and coeff
 }
 
@@ -51,11 +49,11 @@ bool PivotPointPlaneFactor::Evaluate(double const *const *parameters, double *re
   Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
   Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-//  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-//  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
 
-  Eigen::Vector3d tlb = transform_lb_.pos;
-  Eigen::Quaterniond qlb = transform_lb_.rot;
+//  Eigen::Vector3d tlb = transform_lb_.pos;
+//  Eigen::Quaterniond qlb = transform_lb_.rot;
 
   Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
   Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -161,11 +159,11 @@ void PivotPointPlaneFactor::Check(double **parameters) {
   Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
   Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-//  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-//  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
 
-  Eigen::Vector3d tlb = transform_lb_.pos;
-  Eigen::Quaterniond qlb = transform_lb_.rot;
+//  Eigen::Vector3d tlb = transform_lb_.pos;
+//  Eigen::Quaterniond qlb = transform_lb_.rot;
 
   Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
   Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -191,17 +189,17 @@ void PivotPointPlaneFactor::Check(double **parameters) {
 //  Eigen::Matrix<double, 1, 6> num_jacobian;
   Eigen::Matrix<double, 1, 18> num_jacobian;
 //  for (int k = 0; k < 6; k++) {
-  for (int k = 0; k < 12; k++) {
+  for (int k = 0; k < 18; k++) {
     Eigen::Vector3d P_pivot(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Q_pivot(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
 
     Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
     Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-//    Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-//    Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
-    Eigen::Vector3d tlb = transform_lb_.pos;
-    Eigen::Quaterniond qlb = transform_lb_.rot;
+    Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+    Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+//    Eigen::Vector3d tlb = transform_lb_.pos;
+//    Eigen::Quaterniond qlb = transform_lb_.rot;
 
     int a = k / 3, b = k % 3;
     Eigen::Vector3d delta = Eigen::Vector3d(b == 0, b == 1, b == 2) * eps;
@@ -214,10 +212,10 @@ void PivotPointPlaneFactor::Check(double **parameters) {
       Pi += delta;
     else if (a == 3)
       Qi = Qi * DeltaQ(delta);
-//    else if (a == 4)
-//      tlb += delta;
-//    else if (a == 5)
-//      qlb = qlb * DeltaQ(delta);
+    else if (a == 4)
+      tlb += delta;
+    else if (a == 5)
+      qlb = qlb * DeltaQ(delta);
 
     Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
     Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -242,4 +240,4 @@ void PivotPointPlaneFactor::Check(double **parameters) {
 //  DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 12);
 }
 
-//}
+}

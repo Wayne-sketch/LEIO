@@ -31,7 +31,7 @@
 #include <vector>
 #include <Eigen/Eigen>
 
-namespace leio {
+//namespace leio {
 
 /// Adapted from https://github.com/laboshinl/loam_velodyne/blob/master/include/loam_velodyne/CircularBuffer.h
 
@@ -180,6 +180,6 @@ class CircularBuffer {
   T *buffer_;         ///< internal element buffer
 };
 
-} // namespace leio
+//} // namespace leio
 
 #endif // LIO_CIRCULARBUFFER_H_
