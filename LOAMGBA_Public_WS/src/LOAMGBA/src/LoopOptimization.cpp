@@ -300,9 +300,9 @@ Eigen::Vector3f extTrans_f = extTrans.cast<float>();
 Transform transform_lb_{extRPY_f, extTrans_f}; ///< Base to laser transform
 Eigen::Matrix3d R_WI_; ///< R_WI is the rotation from the inertial frame into Lidar's world frame
 Eigen::Quaterniond Q_WI_; ///< Q_WI is the rotation from the inertial frame into Lidar's world frame
-//tf变换  
+//tf变换
 tf::StampedTransform wi_trans_, laser_local_trans_, laser_predict_trans_;
-tf::TransformBroadcaster tf_broadcaster_est_;
+//tf::TransformBroadcaster tf_broadcaster_est_;
 //todo ros publisher还没加
 //LIO滑窗优化用的局部地图点云
 PointCloudPtr local_surf_points_ptr_, local_surf_points_filtered_ptr_;
@@ -3129,7 +3129,7 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
         	                 Ps_.last().cast<float>());
 
     	Transform d_trans = trans_prev.inverse() * trans_curr;
-		//todo transform_sum_追踪
+		//transform_sum_ LidarInfoHandler取出来的
     	Transform transform_incre(transform_bef_mapped_.inverse() * transform_sum_.transform());
 
     	if (estimator_config_.imu_factor) {
@@ -3384,7 +3384,6 @@ void process_lio()
                 double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
                 if (imu_time <= lidar_info_time)
                 {
-                  //todo vins中有update()会更新current_time
                     if (curr_time_ < 0)
                         curr_time_ = imu_time;
                     double dt = imu_time - curr_time_;
@@ -3511,6 +3510,7 @@ void ClearState() {
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "laserPGO");
+//    ROS_FATAL("11111111111111111111111111111111111111111111111111111111111");
 	ros::NodeHandle nh;
 
     //todo 全局变量初始化
@@ -3562,6 +3562,6 @@ int main(int argc, char **argv)
     //执行后端优化的线程
     std::thread measurement_process{process_lio};
  	ros::spin();
-
+	measurement_process.join();
 	return 0;
 }

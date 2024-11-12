@@ -4,7 +4,8 @@ project(faloamBA)
 set(CMAKE_BUILD_TYPE "Release")
 # set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+#set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
@@ -69,21 +70,6 @@ add_executable(balm_back_end src/BALM.cpp include/utility/myso3.cpp)
 target_link_libraries(balm_back_end ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS})
 
 
-
-
-#add_executable(alaserPGO
-#		src/LoopOptimization.cpp
-#		include/utility/Scancontext.cpp
-#        include/utility/VoxelGridLargeScale.cpp
-#		include/CSF/c2cdist.cpp
-#		include/CSF/Cloth.cpp
-#		include/CSF/Constraint.cpp
-#		include/CSF/Particle.cpp
-#		include/CSF/point_cloud.cpp
-#		include/CSF/Rasterization.cpp
-#		include/CSF/XYZReader.cpp
-#		include/CSF/CSF.cpp)
-
 add_executable(alaserPGO
 		src/LoopOptimization.cpp
 		src/ImuInitializer.cpp
@@ -96,7 +82,7 @@ add_executable(alaserPGO
 target_compile_options(alaserPGO
   PRIVATE ${OpenMP_CXX_FLAGS}
 )
-target_link_libraries(alaserPGO 
+target_link_libraries(alaserPGO
   ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${CERES_LIBRARIES}
   ${OpenMP_CXX_FLAGS}
   gtsam

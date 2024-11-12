@@ -36,6 +36,7 @@
 #include <ceres/ceres.h>
 #include "imu_processor/IntegrationBase.hpp"
 #include "utils/math_utils.hpp"
+#include "ros/ros.h"
 
 namespace leio {
 

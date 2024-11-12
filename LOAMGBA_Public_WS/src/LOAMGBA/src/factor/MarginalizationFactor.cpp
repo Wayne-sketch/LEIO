@@ -258,8 +258,8 @@ void MarginalizationInfo::Marginalize() {
     threadsstruct[i].parameter_block_idx = parameter_block_idx;
     int ret = pthread_create(&tids[i], NULL, ThreadsConstructA, (void *) &(threadsstruct[i]));
     if (ret != 0) {
-      ROS_DEBUG("pthread_create error");
-      ROS_BREAK();
+//      ROS_DEBUG("pthread_create error");
+//      ROS_BREAK();
     }
   }
   for (int i = NUM_THREADS - 1; i >= 0; i--) {
