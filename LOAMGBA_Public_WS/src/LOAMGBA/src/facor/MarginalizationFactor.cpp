@@ -32,7 +32,7 @@
 
 #include "factor/MarginalizationFactor.hpp"
 
-namespace leio {
+//namespace leio {
 
 void ResidualBlockInfo::Evaluate() {
   residuals.resize(cost_function->num_residuals());
@@ -392,4 +392,4 @@ bool MarginalizationFactor::Evaluate(double const *const *parameters, double *re
   return true;
 }
 
-}
+//}

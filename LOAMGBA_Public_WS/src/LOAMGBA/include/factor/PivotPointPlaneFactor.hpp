@@ -41,21 +41,22 @@
 #include "utils/math_utils.hpp"
 #include "utils/geometry_utils.hpp"
 
-namespace leio {
+//namespace leio {
 
 using namespace mathutils;
 
-class PivotPointPlaneFactor : public ceres::SizedCostFunction<1, 7, 7, 7> {
+class PivotPointPlaneFactor : public ceres::SizedCostFunction<1, 7, 7> {
 
  public:
   PivotPointPlaneFactor(const Eigen::Vector3d &point,
-                        const Eigen::Vector4d &coeff);
+                        const Eigen::Vector4d &coeff,
+                        const Twist<double> &transform_lb);
   virtual bool Evaluate(double const *const *parameters, double *residuals, double **jacobians) const;
   void Check(double **parameters);
 
   Eigen::Vector3d point_;
   Eigen::Vector4d coeff_;
-
+  Twist<double> transform_lb_;
   // TODO: necessary?
 //  static Eigen::Matrix3d sqrt_info;
   static double sum_t;
@@ -64,6 +65,6 @@ class PivotPointPlaneFactor : public ceres::SizedCostFunction<1, 7, 7, 7> {
 
 };
 
-}
+//}
 
 #endif //LIO_PIVOTPOINTPLANEFACTOR_H_

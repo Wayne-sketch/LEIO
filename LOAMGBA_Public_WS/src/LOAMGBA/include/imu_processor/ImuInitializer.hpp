@@ -47,7 +47,7 @@
 #include "utils/CircularBuffer.h"
 #include "3rdparty/sophus/se3.hpp"
 
-namespace leio {
+//namespace leio {
 
 using namespace std;
 using namespace mathutils;
@@ -90,6 +90,6 @@ class ImuInitializer {
 
 };
 
-}
+//}
 
 #endif //LIO_IMUINITIALIZER_H_

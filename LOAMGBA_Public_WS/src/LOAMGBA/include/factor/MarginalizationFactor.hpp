@@ -45,7 +45,7 @@
 #include "utils/math_utils.hpp"
 #include "utils/geometry_utils.hpp"
 
-namespace leio {
+//namespace leio {
 
 const int NUM_THREADS = 4;
 
@@ -117,6 +117,6 @@ class MarginalizationFactor : public ceres::CostFunction {
   MarginalizationInfo* marginalization_info;
 };
 
-}
+//}
 
 #endif //LIO_MARGINALIZATIONFACTOR_H_

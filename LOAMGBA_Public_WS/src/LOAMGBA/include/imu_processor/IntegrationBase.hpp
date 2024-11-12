@@ -5,7 +5,7 @@
 
 #include "utils/math_utils.hpp"
 
-namespace leio {
+//namespace leio {
 
 using namespace mathutils;
 using Eigen::Vector3d;
@@ -356,6 +356,6 @@ class IntegrationBase {
 
 };
 
-}
+//}
 
 #endif //LIO_INTEGRATIONBASE_H_

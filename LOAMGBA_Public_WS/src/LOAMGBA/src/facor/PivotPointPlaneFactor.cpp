@@ -30,13 +30,15 @@
 
 #include "factor/PivotPointPlaneFactor.hpp"
 
-namespace leio {
+//namespace leio {
 
 static double sqrt_info_static = 1.0;
 
 PivotPointPlaneFactor::PivotPointPlaneFactor(const Eigen::Vector3d &point,
-                                             const Eigen::Vector4d &coeff) : point_{point},
-                                                                             coeff_{coeff} {
+                                             const Eigen::Vector4d &coeff,
+                                             const Twist<double> &transform_lb) : point_{point},
+                                                                             coeff_{coeff},
+                                                                             transform_lb_{transform_lb}{
 /// add new point and coeff
 }
 
@@ -49,11 +51,11 @@ bool PivotPointPlaneFactor::Evaluate(double const *const *parameters, double *re
   Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
   Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+//  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+//  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
 
-//  Eigen::Vector3d tlb = transform_lb_.pos;
-//  Eigen::Quaterniond qlb = transform_lb_.rot;
+  Eigen::Vector3d tlb = transform_lb_.pos;
+  Eigen::Quaterniond qlb = transform_lb_.rot;
 
   Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
   Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -106,31 +108,31 @@ bool PivotPointPlaneFactor::Evaluate(double const *const *parameters, double *re
       jacobian_pose_i.rightCols<1>().setZero();
     }
 
-    if (jacobians[2]) {
-      Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor> > jacobian_pose_ex(jacobians[2]);
-      jacobian_pose_ex.setZero();
-
-      Eigen::Matrix3d I3x3;
-      I3x3.setIdentity();
-
-      Eigen::Matrix3d right_info_mat;
-      right_info_mat.setIdentity();
-      right_info_mat(2, 2) = 1e-6;
-      right_info_mat = Qlpivot.conjugate().normalized() * right_info_mat * Qlpivot.normalized();
-
-      Eigen::Matrix<double, 1, 6> jaco_ex;
-      //  NOTE: planar extrinsic
-//       jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose()) * right_info_mat;
-      jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose());
-      jaco_ex.rightCols<3>() =
-          w.transpose() * rlb * (-SkewSymmetric(Rp.transpose() * Ri * rlb.transpose() * (point_ - tlb))
-              + Rp.transpose() * Ri * SkewSymmetric(rlb.transpose() * (point_ - tlb))
-              - SkewSymmetric(Rp.transpose() * (Pi - P_pivot)));
-
-      jacobian_pose_ex.setZero();
-      jacobian_pose_ex.leftCols<6>() = sqrt_info * jaco_ex;
-      jacobian_pose_ex.rightCols<1>().setZero();
-    }
+//    if (jacobians[2]) {
+//      Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor> > jacobian_pose_ex(jacobians[2]);
+//      jacobian_pose_ex.setZero();
+//
+//      Eigen::Matrix3d I3x3;
+//      I3x3.setIdentity();
+//
+//      Eigen::Matrix3d right_info_mat;
+//      right_info_mat.setIdentity();
+//      right_info_mat(2, 2) = 1e-6;
+//      right_info_mat = Qlpivot.conjugate().normalized() * right_info_mat * Qlpivot.normalized();
+//
+//      Eigen::Matrix<double, 1, 6> jaco_ex;
+//      //  NOTE: planar extrinsic
+////       jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose()) * right_info_mat;
+//      jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose());
+//      jaco_ex.rightCols<3>() =
+//          w.transpose() * rlb * (-SkewSymmetric(Rp.transpose() * Ri * rlb.transpose() * (point_ - tlb))
+//              + Rp.transpose() * Ri * SkewSymmetric(rlb.transpose() * (point_ - tlb))
+//              - SkewSymmetric(Rp.transpose() * (Pi - P_pivot)));
+//
+//      jacobian_pose_ex.setZero();
+//      jacobian_pose_ex.leftCols<6>() = sqrt_info * jaco_ex;
+//      jacobian_pose_ex.rightCols<1>().setZero();
+//    }
   }
 
   return true;
@@ -140,10 +142,10 @@ void PivotPointPlaneFactor::Check(double **parameters) {
 
   double *res = new double[1];
 //  double **jaco = new double *[1];
-  double **jaco = new double *[3];
+  double **jaco = new double *[2];
   jaco[0] = new double[1 * 7];
   jaco[1] = new double[1 * 7];
-  jaco[2] = new double[1 * 7];
+//  jaco[2] = new double[1 * 7];
   Evaluate(parameters, res, jaco);
   DLOG(INFO) << "check begins";
   DLOG(INFO) << "analytical";
@@ -151,7 +153,7 @@ void PivotPointPlaneFactor::Check(double **parameters) {
   DLOG(INFO) << *res;
   DLOG(INFO) << std::endl << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[0]);
   DLOG(INFO) << std::endl << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[1]);
-  DLOG(INFO) << std::endl << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[2]);
+//  DLOG(INFO) << std::endl << Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor>>(jaco[2]);
 
   Eigen::Vector3d P_pivot(parameters[0][0], parameters[0][1], parameters[0][2]);
   Eigen::Quaterniond Q_pivot(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
@@ -159,11 +161,11 @@ void PivotPointPlaneFactor::Check(double **parameters) {
   Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
   Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+//  Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+//  Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
 
-//  Eigen::Vector3d tlb = transform_lb_.pos;
-//  Eigen::Quaterniond qlb = transform_lb_.rot;
+  Eigen::Vector3d tlb = transform_lb_.pos;
+  Eigen::Quaterniond qlb = transform_lb_.rot;
 
   Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
   Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -189,15 +191,17 @@ void PivotPointPlaneFactor::Check(double **parameters) {
 //  Eigen::Matrix<double, 1, 6> num_jacobian;
   Eigen::Matrix<double, 1, 18> num_jacobian;
 //  for (int k = 0; k < 6; k++) {
-  for (int k = 0; k < 18; k++) {
+  for (int k = 0; k < 12; k++) {
     Eigen::Vector3d P_pivot(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Q_pivot(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
 
     Eigen::Vector3d Pi(parameters[1][0], parameters[1][1], parameters[1][2]);
     Eigen::Quaterniond Qi(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
 
-    Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
-    Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+//    Eigen::Vector3d tlb(parameters[2][0], parameters[2][1], parameters[2][2]);
+//    Eigen::Quaterniond qlb(parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]);
+    Eigen::Vector3d tlb = transform_lb_.pos;
+    Eigen::Quaterniond qlb = transform_lb_.rot;
 
     int a = k / 3, b = k % 3;
     Eigen::Vector3d delta = Eigen::Vector3d(b == 0, b == 1, b == 2) * eps;
@@ -210,10 +214,10 @@ void PivotPointPlaneFactor::Check(double **parameters) {
       Pi += delta;
     else if (a == 3)
       Qi = Qi * DeltaQ(delta);
-    else if (a == 4)
-      tlb += delta;
-    else if (a == 5)
-      qlb = qlb * DeltaQ(delta);
+//    else if (a == 4)
+//      tlb += delta;
+//    else if (a == 5)
+//      qlb = qlb * DeltaQ(delta);
 
     Eigen::Quaterniond Qlpivot = Q_pivot * qlb.conjugate();
     Eigen::Vector3d Plpivot = P_pivot - Qlpivot * tlb;
@@ -235,7 +239,7 @@ void PivotPointPlaneFactor::Check(double **parameters) {
   }
   DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 0);
   DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 6);
-  DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 12);
+//  DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 12);
 }
 
-}
+//}

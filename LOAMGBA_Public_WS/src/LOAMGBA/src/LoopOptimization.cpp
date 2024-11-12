@@ -57,6 +57,7 @@
 #include "factor/MarginalizationFactor.hpp"
 #include "factor/PivotPointPlaneFactor.hpp"
 #include "imu_processor/ImuInitializer.hpp"
+#include "imu_processor/IntegrationBase.hpp"
 
 using std::cout;
 using std::endl;
@@ -188,7 +189,7 @@ enum EstimatorStageFlag {
   NOT_INITED,
   INITED,
 };
-//todo 需要把变量都改一下
+//需要把变量都改一下
 struct EstimatorConfig {
   size_t window_size = 15;
   size_t opt_window_size = 5;
@@ -284,7 +285,7 @@ bool convergence_flag_ = false;
 double **para_pose_;
 double **para_speed_bias_;
 //todo 外参不估计 和外参相关的内容需要适配 主要是ceres求残差部分
-//double para_ex_pose_[SIZE_POSE];
+double para_ex_pose_[SIZE_POSE];
 double g_norm_;
 bool gravity_fixed_ = false;
 //边缘化所需
@@ -299,7 +300,7 @@ Matrix3d R_pivot_;
 
 
 
-//todo 参数设定 有些可能用不上 再删除
+//todo 参数设定
 //todo factor可能会和真的factor冲突
 // IMU参数
 float imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
@@ -324,88 +325,6 @@ Eigen::Quaterniond extQRPY = Eigen::Quaterniond(extRPY).inverse();
 Matrix3d ric = extRot.transpose();
 Vector3d tic = -ric * extTrans;
 
-
-//todo 变量命名vins替换成lio-mapping
-bool init_imu = 1;
-bool init_odom = 0;
-double latest_time;
-//frame_count到达window_size后就不再增加
-int frame_count = 0;
-//key为gtsam使用的变量索引 会持续增加
-int key = 0;
-Eigen::Vector3d tmp_P;
-Eigen::Quaterniond tmp_Q;
-Eigen::Vector3d tmp_V;
-Eigen::Vector3d tmp_Ba;
-Eigen::Vector3d tmp_Bg;
-
-
-
-
-
-//imu预积分滑窗
-//todo 把vins替换成lio-mapping
-IntegrationBase *pre_integrations[(estimator_config_.window_size + 1)];
-
-vector<double> dt_buf[(estimator_config_.window_size + 1)];
-vector<Vector3d> linear_acceleration_buf[(estimator_config_.window_size + 1)];
-vector<Vector3d> angular_velocity_buf[(estimator_config_.window_size + 1)];
-//todo 这个要改用lio-mapping的
-
-enum SolverFlag
-{
-    INITIAL,
-    NON_LINEAR
-};
-
-
-
-struct LaserTransform {
-  LaserTransform() {};
-  LaserTransform(double laser_time, Transform laser_transform) : time{laser_time}, transform{laser_transform} {};
-
-  double time;
-  Transform transform;
-  shared_ptr<IntegrationBase> pre_integration;
-
- public:
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-};
-
-
-
-
-
-//todo vins换lio-mapping
-SolverFlag solver_flag = INITIAL;
-double initial_timestamp = 0;
-Eigen::Vector3d G{0.0, 0.0, 9.8};
-int ESTIMATE_EXTRINSIC = 0;
-Matrix3d back_R0, last_R, last_R0;
-Vector3d back_P0, last_P, last_P0;
-
-//todo 优化器使用的double数组 这个适配成lio-mapping
-//外参不用估计
-double para_Pose[estimator_config_.window_size + 1][SIZE_POSE];
-double para_SpeedBias[estimator_config_.window_size + 1][SIZE_SPEEDBIAS];
-
-
-
-bool failure_occur = 0;
-vector<Vector3d> key_poses;
-
-
-
-double timeLaserOdometry = 0.0;
-double timeCenter= 0.0;
-double timeSurf= 0.0;
-double timeEdge= 0.0;
-
-
-
-nav_msgs::Path globalPath;
-
 //激光里程计回调函数
 void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
 {
@@ -421,8 +340,6 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr &_laserOdometry)
     mBuf.unlock();
     con.notify_one();
 }
-
-
 
 //对imu做积分 把最新状态赋值给最新lidar帧
 void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
@@ -496,43 +413,6 @@ void processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &
 //  }
 }
 
-void solveGyroscopeBias(map<double, ImageFrame> &all_lidar_frame, Vector3d* Bgs)
-{
-    Matrix3d A;
-    Vector3d b;
-    Vector3d delta_bg;
-    A.setZero();
-    b.setZero();
-    map<double, ImageFrame>::iterator frame_i;
-    map<double, ImageFrame>::iterator frame_j;
-    for (frame_i = all_lidar_frame.begin(); next(frame_i) != all_lidar_frame.end(); frame_i++)
-    {
-        frame_j = next(frame_i);
-        MatrixXd tmp_A(3, 3);
-        tmp_A.setZero();
-        VectorXd tmp_b(3);
-        tmp_b.setZero();
-        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
-
-        tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
-        tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
-        A += tmp_A.transpose() * tmp_A;
-        b += tmp_A.transpose() * tmp_b;
-
-    }
-    delta_bg = A.ldlt().solve(b);
-    ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
-
-    for (int i = 0; i <= estimator_config_.window_size; i++)
-        Bgs[i] += delta_bg;
-
-    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
-    {
-        frame_j = next(frame_i);
-        frame_j->second.pre_integration->repropagate(Vector3d::Zero(), Bgs[0]);
-    }
-}
-
 MatrixXd TangentBasis(Vector3d &g0)
 {
     Vector3d b, c;
@@ -546,391 +426,6 @@ MatrixXd TangentBasis(Vector3d &g0)
     bc.block<3, 1>(0, 0) = b;
     bc.block<3, 1>(0, 1) = c;
     return bc;
-}
-
-/**
- * @brief 得到了一个初始的重力向量，引入重力大小作为先验，再进行几次迭代优化，求解最终的变量
- *
- * @param[in] all_image_frame
- * @param[in] g
- * @param[in] x
- */
-void RefineGravity(map<double, LidarFrame> &all_lidar_frame, Vector3d &g, VectorXd &x)
-{
-    // 参考论文
-    Vector3d g0 = g.normalized() * G.norm();
-    Vector3d lx, ly;
-    //VectorXd x;
-    int all_frame_count = all_lidar_frame.size();
-    int n_state = all_frame_count * 3 + 2 + 1;
-
-    MatrixXd A{n_state, n_state};
-    A.setZero();
-    VectorXd b{n_state};
-    b.setZero();
-
-    map<double, LidarFrame>::iterator frame_i;
-    map<double, LidarFrame>::iterator frame_j;
-    for(int k = 0; k < 4; k++)
-    {
-        MatrixXd lxly(3, 2);
-        lxly = TangentBasis(g0);
-        int i = 0;
-        for (frame_i = all_lidar_frame.begin(); next(frame_i) != all_lidar_frame.end(); frame_i++, i++)
-        {
-            frame_j = next(frame_i);
-
-            MatrixXd tmp_A(6, 9);
-            tmp_A.setZero();
-            VectorXd tmp_b(6);
-            tmp_b.setZero();
-
-            double dt = frame_j->second.pre_integration->sum_dt;
-
-
-            tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
-            tmp_A.block<3, 2>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity() * lxly;
-            tmp_A.block<3, 1>(0, 8) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;
-            tmp_b.block<3, 1>(0, 0) = frame_j->second.pre_integration->delta_p + frame_i->second.R.transpose() * frame_j->second.R * tic - tic - frame_i->second.R.transpose() * dt * dt / 2 * g0;
-
-            tmp_A.block<3, 3>(3, 0) = -Matrix3d::Identity();
-            tmp_A.block<3, 3>(3, 3) = frame_i->second.R.transpose() * frame_j->second.R;
-            tmp_A.block<3, 2>(3, 6) = frame_i->second.R.transpose() * dt * Matrix3d::Identity() * lxly;
-            tmp_b.block<3, 1>(3, 0) = frame_j->second.pre_integration->delta_v - frame_i->second.R.transpose() * dt * Matrix3d::Identity() * g0;
-
-
-            Matrix<double, 6, 6> cov_inv = Matrix<double, 6, 6>::Zero();
-            //cov.block<6, 6>(0, 0) = IMU_cov[i + 1];
-            //MatrixXd cov_inv = cov.inverse();
-            cov_inv.setIdentity();
-
-            MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
-            VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
-
-            A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();
-            b.segment<6>(i * 3) += r_b.head<6>();
-
-            A.bottomRightCorner<3, 3>() += r_A.bottomRightCorner<3, 3>();
-            b.tail<3>() += r_b.tail<3>();
-
-            A.block<6, 3>(i * 3, n_state - 3) += r_A.topRightCorner<6, 3>();
-            A.block<3, 6>(n_state - 3, i * 3) += r_A.bottomLeftCorner<3, 6>();
-        }
-            A = A * 1000.0;
-            b = b * 1000.0;
-            x = A.ldlt().solve(b);
-            VectorXd dg = x.segment<2>(n_state - 3);
-            g0 = (g0 + lxly * dg).normalized() * G.norm();
-            //double s = x(n_state - 1);
-    }
-    g = g0;
-}
-
-/**
- * @brief 求解各帧的速度，枢纽帧的重力方向，以及尺度
- *
- * @param[in] all_image_frame
- * @param[in] g
- * @param[in] x
- * @return true
- * @return false
- */
-//todo 这个需要确定能否直接用
-bool LinearAlignment(map<double, LidarFrame> &all_lidar_frame, Vector3d &g, VectorXd &x)
-{
-    // 这一部分内容对照论文进行理解
-    int all_frame_count = all_lidar_frame.size();
-    //todo 这个对不对
-    int n_state = all_frame_count * 3 + 3 + 1;
-
-    MatrixXd A{n_state, n_state};
-    A.setZero();
-    VectorXd b{n_state};
-    b.setZero();
-
-    map<double, LidarFrame>::iterator frame_i;
-    map<double, LidarFrame>::iterator frame_j;
-    int i = 0;
-    for (frame_i = all_lidar_frame.begin(); next(frame_i) != all_lidar_frame.end(); frame_i++, i++)
-    {
-        frame_j = next(frame_i);
-
-        MatrixXd tmp_A(6, 10);
-        tmp_A.setZero();
-        VectorXd tmp_b(6);
-        tmp_b.setZero();
-
-        double dt = frame_j->second.pre_integration->sum_dt;
-
-        tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
-        tmp_A.block<3, 3>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity();
-        tmp_A.block<3, 1>(0, 9) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;
-        tmp_b.block<3, 1>(0, 0) = frame_j->second.pre_integration->delta_p + frame_i->second.R.transpose() * frame_j->second.R * tic - tic;
-        //cout << "delta_p   " << frame_j->second.pre_integration->delta_p.transpose() << endl;
-        tmp_A.block<3, 3>(3, 0) = -Matrix3d::Identity();
-        tmp_A.block<3, 3>(3, 3) = frame_i->second.R.transpose() * frame_j->second.R;
-        tmp_A.block<3, 3>(3, 6) = frame_i->second.R.transpose() * dt * Matrix3d::Identity();
-        tmp_b.block<3, 1>(3, 0) = frame_j->second.pre_integration->delta_v;
-        //cout << "delta_v   " << frame_j->second.pre_integration->delta_v.transpose() << endl;
-
-        Matrix<double, 6, 6> cov_inv = Matrix<double, 6, 6>::Zero();
-        //cov.block<6, 6>(0, 0) = IMU_cov[i + 1];
-        //MatrixXd cov_inv = cov.inverse();
-        cov_inv.setIdentity();
-
-        MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
-        VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
-
-        A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();
-        b.segment<6>(i * 3) += r_b.head<6>();
-
-        A.bottomRightCorner<4, 4>() += r_A.bottomRightCorner<4, 4>();
-        b.tail<4>() += r_b.tail<4>();
-
-        A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();
-        A.block<4, 6>(n_state - 4, i * 3) += r_A.bottomLeftCorner<4, 6>();
-    }
-    // 增强数值稳定性
-    A = A * 1000.0;
-    b = b * 1000.0;
-    x = A.ldlt().solve(b);
-    double s = x(n_state - 1) / 100.0;
-    ROS_DEBUG("estimated scale: %f", s);
-    g = x.segment<3>(n_state - 4);
-    ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
-    // 做一些检查
-    if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
-    {
-        return false;
-    }
-    // 重力修复
-    RefineGravity(all_image_frame, g, x);
-    // 得到真实尺度
-    s = (x.tail<1>())(0) / 100.0;
-    (x.tail<1>())(0) = s;
-    ROS_DEBUG_STREAM(" refine     " << g.norm() << " " << g.transpose());
-    if(s < 0.0 )
-        return false;
-    else
-        return true;
-}
-
-bool LidarIMUAlignment(map<double, LidarFrame> &all_lidar_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)
-{
-    solveGyroscopeBias(all_lidar_frame, Bgs);
-    if(LinearAlignment(all_lidar_frame, g, x))
-        return true;
-    else
-        return false;
-}
-
-bool lidarInitialAlign()
-{
-    TicToc t_g;
-    VectorXd x;
-    //solve scale
-    //vins中求尺度 lio已经有尺度了 但是vins中这一步给出了零偏值
-    bool result = LidarIMUAlignment(all_lidar_frame, Bgs, g, x);
-    if(!result)
-    {
-        ROS_DEBUG("solve g failed!");
-        return false;
-    }
-
-    // change state
-    for (int i = 0; i <= frame_count; i++)
-    {
-        Matrix3d Ri = all_lidar_frame[Headers[i].stamp.toSec()].R;
-        Vector3d Pi = all_lidar_frame[Headers[i].stamp.toSec()].T;
-        Ps[i] = Pi;
-        Rs[i] = Ri;
-        all_lidar_frame[Headers[i].stamp.toSec()].is_key_frame = true;
-    }
-
-    double s = (x.tail<1>())(0);
-    for (int i = 0; i <= estimator_config_.window_size; i++)
-    {
-        pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);
-    }
-    for (int i = frame_count; i >= 0; i--)
-        Ps[i] = s * Ps[i] - Rs[i] * tic - (s * Ps[0] - Rs[0] * tic);
-    int kv = -1;
-    map<double, LidarFrame>::iterator frame_i;
-    for (frame_i = all_lidar_frame.begin(); frame_i != all_lidar_frame.end(); frame_i++)
-    {
-        if(frame_i->second.is_key_frame)
-        {
-            kv++;
-            Vs[kv] = frame_i->second.R * x.segment<3>(kv * 3);
-        }
-    }
-
-    Matrix3d R0 = Utility::g2R(g);
-    double yaw = Utility::R2ypr(R0 * Rs[0]).x();
-    R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
-    g = R0 * g;
-    //Matrix3d rot_diff = R0 * Rs[0].transpose();
-    Matrix3d rot_diff = R0;
-    for (int i = 0; i <= frame_count; i++)
-    {
-        Ps[i] = rot_diff * Ps[i];
-        Rs[i] = rot_diff * Rs[i];
-        Vs[i] = rot_diff * Vs[i];
-    }
-    ROS_DEBUG_STREAM("g0     " << g.transpose());
-    ROS_DEBUG_STREAM("my R0  " << Utility::R2ypr(Rs[0]).transpose());
-
-    return true;
-}
-
-//初始化
-bool initialStructure()
-{
-    TicToc t_sfm;
-    //check imu observibility
-    {
-        map<double, LidarFrame>::iterator frame_it;
-        Vector3d sum_g;
-        for (frame_it = all_lidar_frame.begin(), frame_it++; frame_it != all_lidar_frame.end(); frame_it++)
-        {
-            double dt = frame_it->second.pre_integration->sum_dt;
-            Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-            sum_g += tmp_g;
-        }
-        Vector3d aver_g;
-        aver_g = sum_g * 1.0 / ((int)all_lidar_frame.size() - 1);
-        double var = 0;
-        for (frame_it = all_lidar_frame.begin(), frame_it++; frame_it != all_lidar_frame.end(); frame_it++)
-        {
-            double dt = frame_it->second.pre_integration->sum_dt;
-            Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-            var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);
-            //cout << "frame g " << tmp_g.transpose() << endl;
-        }
-        var = sqrt(var / ((int)all_lidar_frame.size() - 1));
-        //ROS_WARN("IMU variation %f!", var);
-        //IMU平均加速度不够也不中断 提示一下
-        if(var < 0.25)
-        {
-            ROS_INFO("IMU excitation not enouth!");
-            //return false;
-        }
-    }
-    // global sfm
-    //solve pnp for all frame
-	//vins中这两步的目的就是把all_image_frame中滑窗内的帧的初始位姿求出来，这里all_lidar_frame已经有初始位姿了
-    if (lidarInitialAlign())
-        return true;
-    else
-    {
-        ROS_INFO("misalign lidar structure with IMU");
-        return false;
-    }
-
-}
-
-void vector2double() {
-    for (int i = 0; i <= estimator_config_.window_size; i++)
-    {
-        para_Pose[i][0] = Ps[i].x();
-        para_Pose[i][1] = Ps[i].y();
-        para_Pose[i][2] = Ps[i].z();
-        Quaterniond q{Rs[i]};
-        para_Pose[i][3] = q.x();
-        para_Pose[i][4] = q.y();
-        para_Pose[i][5] = q.z();
-        para_Pose[i][6] = q.w();
-
-        para_SpeedBias[i][0] = Vs[i].x();
-        para_SpeedBias[i][1] = Vs[i].y();
-        para_SpeedBias[i][2] = Vs[i].z();
-
-        para_SpeedBias[i][3] = Bas[i].x();
-        para_SpeedBias[i][4] = Bas[i].y();
-        para_SpeedBias[i][5] = Bas[i].z();
-
-        para_SpeedBias[i][6] = Bgs[i].x();
-        para_SpeedBias[i][7] = Bgs[i].y();
-        para_SpeedBias[i][8] = Bgs[i].z();
-    }
-}
-
-void double2vector()
-{
-    Vector3d origin_R0 = Utility::R2ypr(Rs[0]);
-    Vector3d origin_P0 = Ps[0];
-
-    if (failure_occur)
-    {
-        origin_R0 = Utility::R2ypr(last_R0);
-        origin_P0 = last_P0;
-        failure_occur = 0;
-    }
-    //todo 可能要改 这里是保持滑窗首帧yaw角不变
-    Vector3d origin_R00 = Utility::R2ypr(Quaterniond(para_Pose[0][6],
-                                                      para_Pose[0][3],
-                                                      para_Pose[0][4],
-                                                      para_Pose[0][5]).toRotationMatrix());
-    double y_diff = origin_R0.x() - origin_R00.x();
-    Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
-    if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0)
-    {
-        ROS_DEBUG("euler singular point!");
-        rot_diff = Rs[0] * Quaterniond(para_Pose[0][6],
-                                       para_Pose[0][3],
-                                       para_Pose[0][4],
-                                       para_Pose[0][5]).toRotationMatrix().transpose();
-    }
-
-    for (int i = 0; i <= estimator_config_.window_size; i++)
-    {
-
-        Rs[i] = rot_diff * Quaterniond(para_Pose[i][6], para_Pose[i][3], para_Pose[i][4], para_Pose[i][5]).normalized().toRotationMatrix();
-
-        Ps[i] = rot_diff * Vector3d(para_Pose[i][0] - para_Pose[0][0],
-                                para_Pose[i][1] - para_Pose[0][1],
-                                para_Pose[i][2] - para_Pose[0][2]) + origin_P0;
-
-        Vs[i] = rot_diff * Vector3d(para_SpeedBias[i][0],
-                                    para_SpeedBias[i][1],
-                                    para_SpeedBias[i][2]);
-
-        Bas[i] = Vector3d(para_SpeedBias[i][3],
-                          para_SpeedBias[i][4],
-                          para_SpeedBias[i][5]);
-
-        Bgs[i] = Vector3d(para_SpeedBias[i][6],
-                          para_SpeedBias[i][7],
-                          para_SpeedBias[i][8]);
-    }
-
-    VectorXd dep = f_manager.getDepthVector();
-    for (int i = 0; i < f_manager.getFeatureCount(); i++)
-        dep(i) = para_Feature[i][0];
-    f_manager.setDepth(dep);
-
-    // relative info between two loop frame
-    if(relocalization_info)
-    {
-        Matrix3d relo_r;
-        Vector3d relo_t;
-        relo_r = rot_diff * Quaterniond(relo_Pose[6], relo_Pose[3], relo_Pose[4], relo_Pose[5]).normalized().toRotationMatrix();
-        relo_t = rot_diff * Vector3d(relo_Pose[0] - para_Pose[0][0],
-                                     relo_Pose[1] - para_Pose[0][1],
-                                     relo_Pose[2] - para_Pose[0][2]) + origin_P0;
-        double drift_correct_yaw;
-        drift_correct_yaw = Utility::R2ypr(prev_relo_r).x() - Utility::R2ypr(relo_r).x();
-        drift_correct_r = Utility::ypr2R(Vector3d(drift_correct_yaw, 0, 0));
-        drift_correct_t = prev_relo_t - drift_correct_r * relo_t;
-        relo_relative_t = relo_r.transpose() * (Ps[relo_frame_local_index] - relo_t);
-        relo_relative_q = relo_r.transpose() * Rs[relo_frame_local_index];
-        relo_relative_yaw = Utility::normalizeAngle(Utility::R2ypr(Rs[relo_frame_local_index]).x() - Utility::R2ypr(relo_r).x());
-        //cout << "vins relo " << endl;
-        //cout << "vins relative_t " << relo_relative_t.transpose() << endl;
-        //cout << "vins relative_yaw " <<relo_relative_yaw << endl;
-        relocalization_info = 0;
-
-    }
 }
 
 //当前lidar系变换到世界系
@@ -1585,16 +1080,16 @@ void VectorToDouble() {
     para_speed_bias_[i][8] = Bgs_[opt_i].z();
   }
 
-//  {
-//    /// base to lidar
-//    para_ex_pose_[0] = transform_lb_.pos.x();
-//    para_ex_pose_[1] = transform_lb_.pos.y();
-//    para_ex_pose_[2] = transform_lb_.pos.z();
-//    para_ex_pose_[3] = transform_lb_.rot.x();
-//    para_ex_pose_[4] = transform_lb_.rot.y();
-//    para_ex_pose_[5] = transform_lb_.rot.z();
-//    para_ex_pose_[6] = transform_lb_.rot.w();
-//  }
+  {
+    /// base to lidar
+    para_ex_pose_[0] = transform_lb_.pos.x();
+    para_ex_pose_[1] = transform_lb_.pos.y();
+    para_ex_pose_[2] = transform_lb_.pos.z();
+    para_ex_pose_[3] = transform_lb_.rot.x();
+    para_ex_pose_[4] = transform_lb_.rot.y();
+    para_ex_pose_[5] = transform_lb_.rot.z();
+    para_ex_pose_[6] = transform_lb_.rot.w();
+  }
 }
 
 void DoubleToVector() {
@@ -1756,7 +1251,6 @@ void SolveOptimization()
       int j = i + 1;
       int opt_i = int(estimator_config_.window_size - estimator_config_.opt_window_size + i);
       int opt_j = opt_i + 1;
-      //todo 预积分前面处理需要合并一下
       if (pre_integrations_[opt_j]->sum_dt_ > 10.0) {
         continue;
       }
@@ -1814,9 +1308,10 @@ void SolveOptimization()
 //
 //          res_ids_proj.push_back(res_id);
         } else {
-          //todo 这里需要改一下 不估计外参
+          //todo 这里需要改一下 不估计外参 外参要传进去 但不需要修改
           PivotPointPlaneFactor *f = new PivotPointPlaneFactor(p_eigen,
-                                                               coeff_eigen);
+                                                               coeff_eigen,
+                                                               transform_lb_);
           ceres::internal::ResidualBlock *res_id =
               problem.AddResidualBlock(f,
                                        loss_function,
@@ -2004,7 +1499,8 @@ void SolveOptimization()
           const Eigen::Vector4d &coeff_eigen = feature_j.coeffs;
 
           PivotPointPlaneFactor *pivot_point_plane_factor = new PivotPointPlaneFactor(p_eigen,
-                                                                                      coeff_eigen);
+                                                                                      coeff_eigen,
+                                                                                      transform_lb_);
 
           ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(pivot_point_plane_factor, loss_function,
                                                                          vector<double *>{para_pose_[0],
@@ -2176,17 +1672,6 @@ void SolveOptimization()
   ROS_DEBUG_STREAM("tic_toc_opt: " << tic_toc_opt.Toc() << " ms");
 }
 
-void solveOdometry()
-{
-    if (frame_count < estimator_config_.window_size)
-        return;
-    if (solver_flag == NON_LINEAR)
-    {
-        TicToc t_tri;
-        optimization();
-    }
-}
-
 //滑窗
 void SlideWindow() { // NOTE: this function is only for the states and the local map
 
@@ -2275,96 +1760,6 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
 
 // TODO: slide new lidar points
 
-}
-
-//todo 可能会导致失败
-bool failureDetection()
-{
-    if (Bas[estimator_config_.window_size].norm() > 2.5)
-    {
-        ROS_INFO(" big IMU acc bias estimation %f", Bas[estimator_config_.window_size].norm());
-        return true;
-    }
-    if (Bgs[estimator_config_.window_size].norm() > 1.0)
-    {
-        ROS_INFO(" big IMU gyr bias estimation %f", Bgs[estimator_config_.window_size].norm());
-        return true;
-    }
-    Vector3d tmp_P = Ps[estimator_config_.window_size];
-    if ((tmp_P - last_P).norm() > 5)
-    {
-        ROS_INFO(" big translation");
-        return true;
-    }
-    if (abs(tmp_P.z() - last_P.z()) > 1)
-    {
-        ROS_INFO(" big z translation");
-        return true;
-    }
-    Matrix3d tmp_R = Rs[estimator_config_.window_size];
-    Matrix3d delta_R = tmp_R.transpose() * last_R;
-    Quaterniond delta_Q(delta_R);
-    double delta_angle;
-    delta_angle = acos(delta_Q.w()) * 2.0 / 3.14 * 180.0;
-    if (delta_angle > 50)
-    {
-        ROS_INFO(" big delta_angle ");
-        //return true;
-    }
-    return false;
-}
-
-void clearState()
-{
-    for (int i = 0; i < estimator_config_.window_size + 1; i++)
-    {
-        Rs[i].setIdentity();
-        Ps[i].setZero();
-        Vs[i].setZero();
-        Bas[i].setZero();
-        Bgs[i].setZero();
-        dt_buf[i].clear();
-        linear_acceleration_buf[i].clear();
-        angular_velocity_buf[i].clear();
-
-        if (pre_integrations[i] != nullptr)
-            delete pre_integrations[i];
-        pre_integrations[i] = nullptr;
-    }
-
-    for (auto &it : all_lidar_frame)
-    {
-        if (it.second.pre_integration != nullptr)
-        {
-            delete it.second.pre_integration;
-            it.second.pre_integration = nullptr;
-        }
-    }
-
-    solver_flag = INITIAL;
-    first_imu_ = false,
-    frame_count = 0;
-    key = 0;
-    //todo 需要对gtsam相关的内容进行管理
-
-    solver_flag = INITIAL;
-    initial_timestamp = 0;
-    all_lidar_frame.clear();
-
-
-    if (tmp_pre_integration != nullptr)
-        delete tmp_pre_integration;
-    if (last_marginalization_info != nullptr)
-        delete last_marginalization_info;
-
-    tmp_pre_integration = nullptr;
-    last_marginalization_info = nullptr;
-
-    failure_occur = 0;
-    relocalization_info = 0;
-
-    drift_correct_r = Matrix3d::Identity();
-    drift_correct_t = Vector3d::Zero();
 }
 
 bool RunInitialization() {
@@ -2796,13 +2191,6 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
   new_laser_odometry_ = true;
 
   DLOG(INFO) << "decode lidar_info time: " << tic_toc_decoder.Toc() << " ms";
-}
-
-void setParameter()
-{
-//  // 固定不变 赋值
-//    tic = TIC[i];
-//    ric = RIC[i];
 }
 
 void TransformAssociateToMap() {
@@ -3798,63 +3186,6 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
 //  }
 }
 
-//todo 这里是IMU积分
-void predict(const sensor_msgs::ImuConstPtr &imu_msg)
-{
-    double t = imu_msg->header.stamp.toSec();
-    if (init_imu)
-    {
-        latest_time = t;
-        init_imu = 0;
-        return;
-    }
-    double dt = t - latest_time;
-    latest_time = t;
-
-    double dx = imu_msg->linear_acceleration.x;
-    double dy = imu_msg->linear_acceleration.y;
-    double dz = imu_msg->linear_acceleration.z;
-    Eigen::Vector3d linear_acceleration{dx, dy, dz};
-
-    double rx = imu_msg->angular_velocity.x;
-    double ry = imu_msg->angular_velocity.y;
-    double rz = imu_msg->angular_velocity.z;
-    Eigen::Vector3d angular_velocity{rx, ry, rz};
-
-    Eigen::Vector3d un_acc_0 = tmp_Q * (acc_last_ - tmp_Ba) - estimator.g;
-
-    Eigen::Vector3d un_gyr = 0.5 * (gyr_last_ + angular_velocity) - tmp_Bg;
-    tmp_Q = tmp_Q * Utility::deltaQ(un_gyr * dt);
-
-    Eigen::Vector3d un_acc_1 = tmp_Q * (linear_acceleration - tmp_Ba) - estimator.g;
-
-    Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
-
-    //最新imu帧的位姿
-    tmp_P = tmp_P + dt * tmp_V + 0.5 * dt * dt * un_acc;
-    tmp_V = tmp_V + dt * un_acc;
-	//上一imu的加速度 角速度 用于中值积分
-    acc_last_ = linear_acceleration;
-    gyr_last_ = angular_velocity;
-}
-
-void update()
-{
-    TicToc t_predict;
-    latest_time = current_time;
-    tmp_P = estimator.Ps[estimator_config_.window_size];
-    tmp_Q = estimator.Rs[estimator_config_.window_size];
-    tmp_V = estimator.Vs[estimator_config_.window_size];
-    tmp_Ba = estimator.Bas[estimator_config_.window_size];
-    tmp_Bg = estimator.Bgs[estimator_config_.window_size];
-    acc_last_ = estimator.acc_last_;
-    gyr_last_ = estimator.gyr_last_;
-
-    queue<sensor_msgs::ImuConstPtr> tmp_imu_buf = imu_buf;
-    for (sensor_msgs::ImuConstPtr tmp_imu_msg; !tmp_imu_buf.empty(); tmp_imu_buf.pop())
-        predict(tmp_imu_buf.front());
-}
-
 //todo 根据需求修改
 void SurfHandler(const sensor_msgs::PointCloud2ConstPtr &_laserSurf)
 {
@@ -3872,92 +3203,92 @@ void EdgeHandler(const sensor_msgs::PointCloud2ConstPtr &_laserEdge)
     con.notify_one();
 }
 
-//todo 根据需求修改
-void pubPath_lio( void )
-{
-    std::cout << "mark pubPath_lio" << std::endl;
-    // pub odom and path
-    nav_msgs::Odometry odomAftPGO;
-    nav_msgs::Path pathAftPGO;
-    pathAftPGO.header.frame_id = "camera_init";
-    //todo 如果很卡再把两个锁分开用
-//    mBuf.lock();
-    //[0, 9]
-    for (int node_idx=0; node_idx < windowSize; node_idx++) // -1 is just delayed visualization (because sometimes mutexed while adding(push_back) a new one)
-    {
-        // 经过isam回环修正后的位姿
-        const Frame& pose_set = frameWindow[node_idx];
-        nav_msgs::Odometry odomAftPGOthis;
-        odomAftPGOthis.header.frame_id = "camera_init";
-        odomAftPGOthis.child_frame_id = "/aft_pgo";
-        // 修正前和修正后的位姿的时间是相同的
-        odomAftPGOthis.header.stamp = ros::Time().fromSec(frameTimes[node_idx]);
-		// 获取位置并赋值
-		odomAftPGOthis.pose.pose.position.x = pose_set.pose.translation().x();
-		odomAftPGOthis.pose.pose.position.y = pose_set.pose.translation().y();
-		odomAftPGOthis.pose.pose.position.z = pose_set.pose.translation().z();
-
-		// 获取姿态并赋值
-		gtsam::Quaternion quaternion = pose_set.pose.rotation().toQuaternion();
-		odomAftPGOthis.pose.pose.orientation.x = quaternion.x();
-		odomAftPGOthis.pose.pose.orientation.y = quaternion.y();
-		odomAftPGOthis.pose.pose.orientation.z = quaternion.z();
-		odomAftPGOthis.pose.pose.orientation.w = quaternion.w();
-
-        odomAftPGO = odomAftPGOthis;
-
-        geometry_msgs::PoseStamped poseStampAftPGO;
-        poseStampAftPGO.header = odomAftPGOthis.header;
-        poseStampAftPGO.pose = odomAftPGOthis.pose.pose;
-
-        pathAftPGO.header.stamp = odomAftPGOthis.header.stamp;
-        pathAftPGO.header.frame_id = "camera_init";
-        pathAftPGO.poses.push_back(poseStampAftPGO);
-    }
-//    mBuf.unlock();
-
-    //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
-//    std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/kitti_dataset/result/loamgba/result_pose_09_30_0027_07_loop.txt", std::ios::app);
-//    pose1.setf(std::ios::scientific, std::ios::floatfield);
-//    //kitti数据集转换tum格式的数据是18位
-//    pose1.precision(9);
-//    //第一个激光帧时间 static变量 只赋值一次
-//    static double timeStart = odomAftPGO.header.stamp.toSec();
-//    auto T1 =ros::Time().fromSec(timeStart) ;
-//    // tf::Quaternion quat;
-//    // tf::createQuaternionMsgFromRollPitchYaw(double r, double p, double y);//返回四元数
-//    pose1<< odomAftPGO.header.stamp -T1<< " "
-//        << -odomAftPGO.pose.pose.position.x << " "
-//        << -odomAftPGO.pose.pose.position.z << " "
-//        << -odomAftPGO.pose.pose.position.y<< " "
-//        << odomAftPGO.pose.pose.orientation.x << " "
-//        << odomAftPGO.pose.pose.orientation.y << " "
-//        << odomAftPGO.pose.pose.orientation.z << " "
-//        << odomAftPGO.pose.pose.orientation.w << std::endl;
-//    pose1.close();
-
-
-    pubOdomAftPGO.publish(odomAftPGO); // 滑窗内最后一帧位姿
-    pubPathAftPGO.publish(pathAftPGO); // 轨迹
-
-    //cout << "pathAftPGO.poses = " << pathAftPGO.poses.size() << endl;
-    globalPath = pathAftPGO;
-    if(follow)
-    {
-        static tf::TransformBroadcaster br;
-        tf::Transform transform;
-        tf::Quaternion q;
-        transform.setOrigin(tf::Vector3(odomAftPGO.pose.pose.position.x, odomAftPGO.pose.pose.position.y, odomAftPGO.pose.pose.position.z));
-        q.setW(odomAftPGO.pose.pose.orientation.w);
-        q.setX(odomAftPGO.pose.pose.orientation.x);
-        q.setY(odomAftPGO.pose.pose.orientation.y);
-        q.setZ(odomAftPGO.pose.pose.orientation.z);
-        transform.setRotation(q);
-        br.sendTransform(tf::StampedTransform(transform, odomAftPGO.header.stamp, "camera_init", "/aft_pgo"));
-
-    }
-
-} // pubPath_lio
+////todo 根据需求修改
+//void pubPath_lio( void )
+//{
+//    std::cout << "mark pubPath_lio" << std::endl;
+//    // pub odom and path
+//    nav_msgs::Odometry odomAftPGO;
+//    nav_msgs::Path pathAftPGO;
+//    pathAftPGO.header.frame_id = "camera_init";
+//    //todo 如果很卡再把两个锁分开用
+////    mBuf.lock();
+//    //[0, 9]
+//    for (int node_idx=0; node_idx < windowSize; node_idx++) // -1 is just delayed visualization (because sometimes mutexed while adding(push_back) a new one)
+//    {
+//        // 经过isam回环修正后的位姿
+//        const Frame& pose_set = frameWindow[node_idx];
+//        nav_msgs::Odometry odomAftPGOthis;
+//        odomAftPGOthis.header.frame_id = "camera_init";
+//        odomAftPGOthis.child_frame_id = "/aft_pgo";
+//        // 修正前和修正后的位姿的时间是相同的
+//        odomAftPGOthis.header.stamp = ros::Time().fromSec(frameTimes[node_idx]);
+//		// 获取位置并赋值
+//		odomAftPGOthis.pose.pose.position.x = pose_set.pose.translation().x();
+//		odomAftPGOthis.pose.pose.position.y = pose_set.pose.translation().y();
+//		odomAftPGOthis.pose.pose.position.z = pose_set.pose.translation().z();
+//
+//		// 获取姿态并赋值
+//		gtsam::Quaternion quaternion = pose_set.pose.rotation().toQuaternion();
+//		odomAftPGOthis.pose.pose.orientation.x = quaternion.x();
+//		odomAftPGOthis.pose.pose.orientation.y = quaternion.y();
+//		odomAftPGOthis.pose.pose.orientation.z = quaternion.z();
+//		odomAftPGOthis.pose.pose.orientation.w = quaternion.w();
+//
+//        odomAftPGO = odomAftPGOthis;
+//
+//        geometry_msgs::PoseStamped poseStampAftPGO;
+//        poseStampAftPGO.header = odomAftPGOthis.header;
+//        poseStampAftPGO.pose = odomAftPGOthis.pose.pose;
+//
+//        pathAftPGO.header.stamp = odomAftPGOthis.header.stamp;
+//        pathAftPGO.header.frame_id = "camera_init";
+//        pathAftPGO.poses.push_back(poseStampAftPGO);
+//    }
+////    mBuf.unlock();
+//
+//    //保存轨迹，path_save是文件目录,txt文件提前建好 tum格式 time x y z
+////    std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/dataset/kitti_dataset/result/loamgba/result_pose_09_30_0027_07_loop.txt", std::ios::app);
+////    pose1.setf(std::ios::scientific, std::ios::floatfield);
+////    //kitti数据集转换tum格式的数据是18位
+////    pose1.precision(9);
+////    //第一个激光帧时间 static变量 只赋值一次
+////    static double timeStart = odomAftPGO.header.stamp.toSec();
+////    auto T1 =ros::Time().fromSec(timeStart) ;
+////    // tf::Quaternion quat;
+////    // tf::createQuaternionMsgFromRollPitchYaw(double r, double p, double y);//返回四元数
+////    pose1<< odomAftPGO.header.stamp -T1<< " "
+////        << -odomAftPGO.pose.pose.position.x << " "
+////        << -odomAftPGO.pose.pose.position.z << " "
+////        << -odomAftPGO.pose.pose.position.y<< " "
+////        << odomAftPGO.pose.pose.orientation.x << " "
+////        << odomAftPGO.pose.pose.orientation.y << " "
+////        << odomAftPGO.pose.pose.orientation.z << " "
+////        << odomAftPGO.pose.pose.orientation.w << std::endl;
+////    pose1.close();
+//
+//
+//    pubOdomAftPGO.publish(odomAftPGO); // 滑窗内最后一帧位姿
+//    pubPathAftPGO.publish(pathAftPGO); // 轨迹
+//
+//    //cout << "pathAftPGO.poses = " << pathAftPGO.poses.size() << endl;
+//    globalPath = pathAftPGO;
+//    if(follow)
+//    {
+//        static tf::TransformBroadcaster br;
+//        tf::Transform transform;
+//        tf::Quaternion q;
+//        transform.setOrigin(tf::Vector3(odomAftPGO.pose.pose.position.x, odomAftPGO.pose.pose.position.y, odomAftPGO.pose.pose.position.z));
+//        q.setW(odomAftPGO.pose.pose.orientation.w);
+//        q.setX(odomAftPGO.pose.pose.orientation.x);
+//        q.setY(odomAftPGO.pose.pose.orientation.y);
+//        q.setZ(odomAftPGO.pose.pose.orientation.z);
+//        transform.setRotation(q);
+//        br.sendTransform(tf::StampedTransform(transform, odomAftPGO.header.stamp, "camera_init", "/aft_pgo"));
+//
+//    }
+//
+//} // pubPath_lio
 
 
 void imuHandler(const sensor_msgs::ImuConstPtr &imu_msg)
