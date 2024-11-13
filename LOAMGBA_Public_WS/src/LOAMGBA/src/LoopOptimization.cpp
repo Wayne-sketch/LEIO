@@ -3306,17 +3306,21 @@ getMeasurements()
 
     while (true)
     {
-        if (imu_buf.empty() || odometryBuf.empty())
+        if (imu_buf.empty() || odometryBuf.empty() || surfBuf.empty() || edgeBuf.empty())
             return measurements;
 
         if (!(imu_buf.back()->header.stamp.toSec() > odometryBuf.front()->header.stamp.toSec()))
         {
-            //ROS_WARN("wait for imu, only should happen at the beginning");
+            ROS_WARN("wait for imu, only should happen at the beginning");
             return measurements;
         }
 
         if (!(imu_buf.front()->header.stamp.toSec() < odometryBuf.front()->header.stamp.toSec()))
         {
+//          	ROS_WARN("IMU timestamp: %.6f, Odometry timestamp: %.6f",
+//         imu_buf.front()->header.stamp.toSec(),
+//         odometryBuf.front()->header.stamp.toSec());
+
             ROS_WARN("throw odom, only should happen at the beginning");
             if(odometryBuf.size() != 0)
             	odometryBuf.pop();
@@ -3346,7 +3350,10 @@ getMeasurements()
         lidar_info.laser_odometry_ = odom_msg;
         lidar_info.surf_cloud_ = surf_msg;
         lidar_info.edge_cloud_ = edge_msg;
-
+//        ROS_WARN("Odometry timestamp: %.6f, Surf points timestamp: %.6f, Edge points timestamp: %.6f",
+//         odom_msg->header.stamp.toSec(),
+//         surf_msg->header.stamp.toSec(),
+//         edge_msg->header.stamp.toSec());
         std::vector<sensor_msgs::ImuConstPtr> IMUs;
         while (imu_buf.front()->header.stamp.toSec() < odom_msg->header.stamp.toSec())
         {
@@ -3354,6 +3361,8 @@ getMeasurements()
             imu_buf.pop();
         }
         IMUs.emplace_back(imu_buf.front());
+//        ROS_WARN("Last IMU timestamp: %.6f",
+//         imu_buf.front()->header.stamp.toSec());
         if (IMUs.empty())
             ROS_WARN("no imu between two image");
 
@@ -3372,79 +3381,81 @@ void process_lio()
             return (measurements = getMeasurements()).size() != 0;
                  });
         lk.unlock();
+        //todo buffer接消息有问题，有连续重复的时间戳
+//        ROS_INFO("success to get information！");
         //vins中和restart有关 这里用不着
 //        m_estimator.lock();
-		for (auto &measurement : measurements)
-        {
-            auto lidar_info = measurement.second;
-            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
-            for (auto &imu_msg : measurement.first)
-            {
-                double imu_time = imu_msg->header.stamp.toSec();
-                double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
-                if (imu_time <= lidar_info_time)
-                {
-                    if (curr_time_ < 0)
-                        curr_time_ = imu_time;
-                    double dt = imu_time - curr_time_;
-                    ROS_ASSERT(dt >= 0);
-                    curr_time_ = imu_time;
-                    dx = imu_msg->linear_acceleration.x;
-                    dy = imu_msg->linear_acceleration.y;
-                    dz = imu_msg->linear_acceleration.z;
-                    rx = imu_msg->angular_velocity.x;
-                    ry = imu_msg->angular_velocity.y;
-                    rz = imu_msg->angular_velocity.z;
-                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
-                }
-                else
-                {
-                    double dt_1 = lidar_info_time - curr_time_;
-                    double dt_2 = imu_time - lidar_info_time;
-                    curr_time_ = lidar_info_time;
-                    ROS_ASSERT(dt_1 >= 0);
-                    ROS_ASSERT(dt_2 >= 0);
-                    ROS_ASSERT(dt_1 + dt_2 > 0);
-                    double w1 = dt_2 / (dt_1 + dt_2);
-                    double w2 = dt_1 / (dt_1 + dt_2);
-                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
-                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
-                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
-                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
-                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
-                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
-                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
-                }
-            }
-
-            TicToc t_s;
-            processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
-
-            double whole_t = t_s.toc();
-//            printStatistics(estimator, whole_t);
-//            std_msgs::Header header = img_msg->header;
-//            header.frame_id = "world";
+//		for (auto &measurement : measurements)
+//        {
+//            auto lidar_info = measurement.second;
+//            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
+//            for (auto &imu_msg : measurement.first)
+//            {
+//                double imu_time = imu_msg->header.stamp.toSec();
+//                double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
+//                if (imu_time <= lidar_info_time)
+//                {
+//                    if (curr_time_ < 0)
+//                        curr_time_ = imu_time;
+//                    double dt = imu_time - curr_time_;
+//                    ROS_ASSERT(dt >= 0);
+//                    curr_time_ = imu_time;
+//                    dx = imu_msg->linear_acceleration.x;
+//                    dy = imu_msg->linear_acceleration.y;
+//                    dz = imu_msg->linear_acceleration.z;
+//                    rx = imu_msg->angular_velocity.x;
+//                    ry = imu_msg->angular_velocity.y;
+//                    rz = imu_msg->angular_velocity.z;
+//                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+//                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
+//                }
+//                else
+//                {
+//                    double dt_1 = lidar_info_time - curr_time_;
+//                    double dt_2 = imu_time - lidar_info_time;
+//                    curr_time_ = lidar_info_time;
+//                    ROS_ASSERT(dt_1 >= 0);
+//                    ROS_ASSERT(dt_2 >= 0);
+//                    ROS_ASSERT(dt_1 + dt_2 > 0);
+//                    double w1 = dt_2 / (dt_1 + dt_2);
+//                    double w2 = dt_1 / (dt_1 + dt_2);
+//                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
+//                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
+//                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
+//                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
+//                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
+//                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
+//                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+//                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
+//                }
+//            }
 //
-//            pubOdometry(estimator, header);
-//            pubKeyPoses(estimator, header);
-//            pubCameraPose(estimator, header);
-//            pubPointCloud(estimator, header);
-//            pubTF(estimator, header);
-//            pubKeyframe(estimator);
-//            if (relo_msg != NULL)
-//                pubRelocalization(estimator);
-            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
-        }
-//        m_estimator.unlock();
-        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
-        mBuf.lock();
-        m_state.lock();
-//        if (solver_flag == NON_LINEAR)
-//            update();
-        m_state.unlock();
-        mBuf.unlock();
+//            TicToc t_s;
+//            processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
+//
+//            double whole_t = t_s.toc();
+////            printStatistics(estimator, whole_t);
+////            std_msgs::Header header = img_msg->header;
+////            header.frame_id = "world";
+////
+////            pubOdometry(estimator, header);
+////            pubKeyPoses(estimator, header);
+////            pubCameraPose(estimator, header);
+////            pubPointCloud(estimator, header);
+////            pubTF(estimator, header);
+////            pubKeyframe(estimator);
+////            if (relo_msg != NULL)
+////                pubRelocalization(estimator);
+//            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
+//        }
+////        m_estimator.unlock();
+//        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
+//        mBuf.lock();
+//        m_state.lock();
+////        if (solver_flag == NON_LINEAR)
+////            update();
+//        m_state.unlock();
+//        mBuf.unlock();
 	}
 } // process_lio
 

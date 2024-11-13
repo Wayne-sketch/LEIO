@@ -520,7 +520,7 @@ int main(int argc, char **argv)
 //                ros::Time time = ros::Time::now();
 //                odomAftMapped.header.stamp = time;
                 //todo 时间戳赋值对应到原本的位姿上 可能因为发布逻辑导致时间戳混乱
-                ros::Time time = ros::Time().fromNSec(pl_time_buf[window_base + 1]);
+                ros::Time time = ros::Time().fromNSec(pl_time_buf[window_base + i]);
                 odomAftMapped.header.stamp = time;
                 odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
                 odomAftMapped.pose.pose.orientation.y = q_w_curr.y();
