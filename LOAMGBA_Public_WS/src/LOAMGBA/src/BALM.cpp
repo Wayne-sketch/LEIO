@@ -530,7 +530,7 @@ int main(int argc, char **argv)
                 odomAftMapped.pose.pose.position.y = opt_lsv.t_poses[i].y();
                 odomAftMapped.pose.pose.position.z = opt_lsv.t_poses[i].z();
 
-                //todo 发送给lio模块用的点云 时间戳要修改
+                //发送给lio模块用的点云 时间戳要修改
                 // ---------------------- 发布优化后的位姿给Rviz 和 loop模块 ------------------------------
                 pubOdomAftMapped.publish(odomAftMapped);
                 // ----------------------------------- for loop ----------------------------------------

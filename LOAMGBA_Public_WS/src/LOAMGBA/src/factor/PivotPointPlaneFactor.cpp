@@ -106,31 +106,31 @@ bool PivotPointPlaneFactor::Evaluate(double const *const *parameters, double *re
       jacobian_pose_i.rightCols<1>().setZero();
     }
 
-//    if (jacobians[2]) {
-//      Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor> > jacobian_pose_ex(jacobians[2]);
-//      jacobian_pose_ex.setZero();
-//
-//      Eigen::Matrix3d I3x3;
-//      I3x3.setIdentity();
-//
-//      Eigen::Matrix3d right_info_mat;
-//      right_info_mat.setIdentity();
-//      right_info_mat(2, 2) = 1e-6;
-//      right_info_mat = Qlpivot.conjugate().normalized() * right_info_mat * Qlpivot.normalized();
-//
-//      Eigen::Matrix<double, 1, 6> jaco_ex;
-//      //  NOTE: planar extrinsic
-////       jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose()) * right_info_mat;
-//      jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose());
-//      jaco_ex.rightCols<3>() =
-//          w.transpose() * rlb * (-SkewSymmetric(Rp.transpose() * Ri * rlb.transpose() * (point_ - tlb))
-//              + Rp.transpose() * Ri * SkewSymmetric(rlb.transpose() * (point_ - tlb))
-//              - SkewSymmetric(Rp.transpose() * (Pi - P_pivot)));
-//
-//      jacobian_pose_ex.setZero();
-//      jacobian_pose_ex.leftCols<6>() = sqrt_info * jaco_ex;
-//      jacobian_pose_ex.rightCols<1>().setZero();
-//    }
+    if (jacobians[2]) {
+      Eigen::Map<Eigen::Matrix<double, 1, 7, Eigen::RowMajor> > jacobian_pose_ex(jacobians[2]);
+      jacobian_pose_ex.setZero();
+
+      Eigen::Matrix3d I3x3;
+      I3x3.setIdentity();
+
+      Eigen::Matrix3d right_info_mat;
+      right_info_mat.setIdentity();
+      right_info_mat(2, 2) = 1e-6;
+      right_info_mat = Qlpivot.conjugate().normalized() * right_info_mat * Qlpivot.normalized();
+
+      Eigen::Matrix<double, 1, 6> jaco_ex;
+      //  NOTE: planar extrinsic
+//       jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose()) * right_info_mat;
+      jaco_ex.leftCols<3>() = w.transpose() * (I3x3 - rlb * Rp.transpose() * Ri * rlb.transpose());
+      jaco_ex.rightCols<3>() =
+          w.transpose() * rlb * (-SkewSymmetric(Rp.transpose() * Ri * rlb.transpose() * (point_ - tlb))
+              + Rp.transpose() * Ri * SkewSymmetric(rlb.transpose() * (point_ - tlb))
+              - SkewSymmetric(Rp.transpose() * (Pi - P_pivot)));
+
+      jacobian_pose_ex.setZero();
+      jacobian_pose_ex.leftCols<6>() = sqrt_info * jaco_ex;
+      jacobian_pose_ex.rightCols<1>().setZero();
+    }
   }
 
   return true;
@@ -237,7 +237,7 @@ void PivotPointPlaneFactor::Check(double **parameters) {
   }
   DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 0);
   DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 6);
-//  DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 12);
+  DLOG(INFO) << std::endl << num_jacobian.block<1, 6>(0, 12);
 }
 
 }

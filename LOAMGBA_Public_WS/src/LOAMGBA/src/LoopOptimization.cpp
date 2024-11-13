@@ -74,6 +74,8 @@ using Eigen::Matrix3d;
 using std::shared_ptr;
 using std::unique_ptr;
 //todo 全局变量、类型定义 能直接初始化在定义时初始化 不能的放在main函数中初始化
+//ros消息发布
+ros::Publisher pubOdomAftLio;
 // IMU参数 + 外参
 double imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
 double imuGyrNoise = 1.5636343949698187e-03;          // 角速度噪声标准差
@@ -229,7 +231,7 @@ struct EstimatorConfig {
   //todo 追踪
   Transform transform_lb{Eigen::Quaternionf(1, 0, 0, 0), Eigen::Vector3f(0, 0, -0.1)};
 
-  bool opt_extrinsic = true; //not used
+  bool opt_extrinsic = true;
 
   bool run_optimization = true;
   bool update_laser_imu = true;
@@ -238,7 +240,7 @@ struct EstimatorConfig {
   bool imu_factor = true;
   bool point_distance_factor = true;
   bool prior_factor = true; //true: 外参参与优化尽量保持不变
-  bool marginalization_factor = true;
+  bool marginalization_factor = true; //边缘掉得到的先验因子
   bool pcl_viewer = false; //not used
 
   //todo 这里可能要改 不需要去畸变
@@ -248,7 +250,7 @@ struct EstimatorConfig {
 
   leio::IntegrationBaseConfig pim_config;
 };
-int extrinsic_stage_ = 1; //外参估计
+int extrinsic_stage_ = 1; //外参估计 0固定外参 1有初始值 优化外参 2没有初始值 估计外参
 EstimatorStageFlag stage_flag_ = NOT_INITED;
 EstimatorConfig estimator_config_;
 
@@ -1201,6 +1203,7 @@ void SolveOptimization() {
   	vector<FeaturePerFrame> feature_frames;
 //lio滑窗构建局部地图 填充feature_frames 里面存了特征拟合参数 同时calculateOdom更新了一次
   	BuildLocalMap(feature_frames);
+    //ceres添加参数块
   	vector<double *> para_ids;
   	//region Add pose and speed bias parameters
   	for (int i = 0; i < estimator_config_.opt_window_size + 1;
@@ -1212,11 +1215,25 @@ void SolveOptimization() {
     	para_ids.push_back(para_speed_bias_[i]);
   	}
   //endregion
-//这里去掉了外参估计部分
+
+          //region Add extrinsic parameters
+  	{
+    	ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
+    	problem.AddParameterBlock(para_ex_pose_, leio::SIZE_POSE, local_parameterization);
+    	para_ids.push_back(para_ex_pose_);
+    	if (extrinsic_stage_ == 0 || estimator_config_.opt_extrinsic == false) {
+      		DLOG(INFO) << "fix extrinsic param";
+      		problem.SetParameterBlockConstant(para_ex_pose_);
+    	} else {
+      		DLOG(INFO) << "estimate extrinsic param";
+    	}
+  	}
+	//ceres初始值
     VectorToDouble();
-    //边缘化因子
-	vector<ceres::internal::ResidualBlock *> res_ids_marg;
-	ceres::internal::ResidualBlock *res_id_marg = NULL;
+
+  //边缘化因子
+  vector<ceres::internal::ResidualBlock *> res_ids_marg;
+  ceres::internal::ResidualBlock *res_id_marg = NULL;
 
   //region Marginalization residual
   if (estimator_config_.marginalization_factor) {
@@ -1319,7 +1336,7 @@ void SolveOptimization() {
     }
   }
 
-  //todo 这里不想加 不想优化外参 这个先验尝试让外参不变
+  //这个外参先验因子尝试让外参不变
   if (estimator_config_.prior_factor) {
     {
       Twist<double> trans_tmp = transform_lb_.cast<double>();
@@ -2036,18 +2053,18 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
             }
           } else {
 
-//            if (extrinsic_stage_ == 2) {
-//              // TODO: move before initialization
-//              bool extrinsic_result = ImuInitializer::EstimateExtrinsicRotation(all_laser_transforms_, transform_lb_);
-//              LOG(INFO) << ">>>>>>> extrinsic calibration"
-//                        << (extrinsic_result ? " successful"
-//                                             : " failed")
-//                        << " <<<<<<<";
-//              if (extrinsic_result) {
-//                extrinsic_stage_ = 1;
-//                DLOG(INFO) << "change extrinsic stage to 1";
-//              }
-//            }
+            if (extrinsic_stage_ == 2) {
+              // TODO: move before initialization
+              bool extrinsic_result = leio::ImuInitializer::EstimateExtrinsicRotation(all_laser_transforms_, transform_lb_);
+              LOG(INFO) << ">>>>>>> extrinsic calibration"
+                        << (extrinsic_result ? " successful"
+                                             : " failed")
+                        << " <<<<<<<";
+              if (extrinsic_result) {
+                extrinsic_stage_ = 1;
+                DLOG(INFO) << "change extrinsic stage to 1";
+              }
+            }
 
             if (extrinsic_stage_ != 2 && (header.stamp.toSec() - initial_time_) > 0.1) {
               DLOG(INFO) << "EXTRINSIC STAGE: " << extrinsic_stage_;
@@ -2160,7 +2177,28 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //      PublishResults();
         SlideWindow();
 
-//        {
+        {
+        	//发布pivot帧位姿
+        	nav_msgs::Odometry odomAftLioPivot;
+        	odomAftLioPivot.header.frame_id = "camera_init";
+        	int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
+        	odomAftLioPivot.header.stamp = Headers_[pivot_idx + 1].stamp;
+          	odomAftLioPivot.header.seq += 1;
+          	Twist<double> transform_lb = transform_lb_.cast<double>();
+          	Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
+          	Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
+          	Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+          	Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
+          	Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
+          	odomAftLioPivot.pose.pose.orientation.x = transform_pivot.rot.x();
+          	odomAftLioPivot.pose.pose.orientation.y = transform_pivot.rot.y();
+          	odomAftLioPivot.pose.pose.orientation.z = transform_pivot.rot.z();
+          	odomAftLioPivot.pose.pose.orientation.w = transform_pivot.rot.w();
+          	odomAftLioPivot.pose.pose.position.x = transform_pivot.pos.x();
+          	odomAftLioPivot.pose.pose.position.y = transform_pivot.pos.y();
+          	odomAftLioPivot.pose.pose.position.z = transform_pivot.pos.z();
+          	pubOdomAftLio.publish(odomAftLioPivot);
+
 //          int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
 //          local_odom_.header.stamp = Headers_[pivot_idx + 1].stamp;
 //          local_odom_.header.seq += 1;
@@ -2228,7 +2266,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //              << laser_odom_.pose.pose.orientation.z << " "
 //              << laser_odom_.pose.pose.orientation.w << std::endl;
 //          pose1.close();
-//        }
+        }
 
         break;
       }//end INITED
@@ -3381,81 +3419,81 @@ void process_lio()
             return (measurements = getMeasurements()).size() != 0;
                  });
         lk.unlock();
-        //todo buffer接消息有问题，有连续重复的时间戳
+
 //        ROS_INFO("success to get information！");
-        //vins中和restart有关 这里用不着
+//        vins中和restart有关 这里用不着
 //        m_estimator.lock();
-//		for (auto &measurement : measurements)
-//        {
-//            auto lidar_info = measurement.second;
-//            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
-//            for (auto &imu_msg : measurement.first)
-//            {
-//                double imu_time = imu_msg->header.stamp.toSec();
-//                double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
-//                if (imu_time <= lidar_info_time)
-//                {
-//                    if (curr_time_ < 0)
-//                        curr_time_ = imu_time;
-//                    double dt = imu_time - curr_time_;
-//                    ROS_ASSERT(dt >= 0);
-//                    curr_time_ = imu_time;
-//                    dx = imu_msg->linear_acceleration.x;
-//                    dy = imu_msg->linear_acceleration.y;
-//                    dz = imu_msg->linear_acceleration.z;
-//                    rx = imu_msg->angular_velocity.x;
-//                    ry = imu_msg->angular_velocity.y;
-//                    rz = imu_msg->angular_velocity.z;
-//                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-//                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
-//                }
-//                else
-//                {
-//                    double dt_1 = lidar_info_time - curr_time_;
-//                    double dt_2 = imu_time - lidar_info_time;
-//                    curr_time_ = lidar_info_time;
-//                    ROS_ASSERT(dt_1 >= 0);
-//                    ROS_ASSERT(dt_2 >= 0);
-//                    ROS_ASSERT(dt_1 + dt_2 > 0);
-//                    double w1 = dt_2 / (dt_1 + dt_2);
-//                    double w2 = dt_1 / (dt_1 + dt_2);
-//                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
-//                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
-//                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
-//                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
-//                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
-//                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
-//                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
-//                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
-//                }
-//            }
+		for (auto &measurement : measurements)
+        {
+            auto lidar_info = measurement.second;
+            double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
+            for (auto &imu_msg : measurement.first)
+            {
+                double imu_time = imu_msg->header.stamp.toSec();
+                double lidar_info_time = lidar_info.laser_odometry_->header.stamp.toSec();
+                if (imu_time <= lidar_info_time)
+                {
+                    if (curr_time_ < 0)
+                        curr_time_ = imu_time;
+                    double dt = imu_time - curr_time_;
+                    ROS_ASSERT(dt >= 0);
+                    curr_time_ = imu_time;
+                    dx = imu_msg->linear_acceleration.x;
+                    dy = imu_msg->linear_acceleration.y;
+                    dz = imu_msg->linear_acceleration.z;
+                    rx = imu_msg->angular_velocity.x;
+                    ry = imu_msg->angular_velocity.y;
+                    rz = imu_msg->angular_velocity.z;
+                    processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+                    //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
+                }
+                else
+                {
+                    double dt_1 = lidar_info_time - curr_time_;
+                    double dt_2 = imu_time - lidar_info_time;
+                    curr_time_ = lidar_info_time;
+                    ROS_ASSERT(dt_1 >= 0);
+                    ROS_ASSERT(dt_2 >= 0);
+                    ROS_ASSERT(dt_1 + dt_2 > 0);
+                    double w1 = dt_2 / (dt_1 + dt_2);
+                    double w2 = dt_1 / (dt_1 + dt_2);
+                    dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
+                    dy = w1 * dy + w2 * imu_msg->linear_acceleration.y;
+                    dz = w1 * dz + w2 * imu_msg->linear_acceleration.z;
+                    rx = w1 * rx + w2 * imu_msg->angular_velocity.x;
+                    ry = w1 * ry + w2 * imu_msg->angular_velocity.y;
+                    rz = w1 * rz + w2 * imu_msg->angular_velocity.z;
+                    processIMU(dt_1, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz), imu_msg->header);
+                    //printf("dimu: dt:%f a: %f %f %f w: %f %f %f\n",dt_1, dx, dy, dz, rx, ry, rz);
+                }
+            }
+
+            TicToc t_s;
+            processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
+
+            double whole_t = t_s.toc();
+//            printStatistics(estimator, whole_t);
+//            std_msgs::Header header = img_msg->header;
+//            header.frame_id = "world";
 //
-//            TicToc t_s;
-//            processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
-//
-//            double whole_t = t_s.toc();
-////            printStatistics(estimator, whole_t);
-////            std_msgs::Header header = img_msg->header;
-////            header.frame_id = "world";
-////
-////            pubOdometry(estimator, header);
-////            pubKeyPoses(estimator, header);
-////            pubCameraPose(estimator, header);
-////            pubPointCloud(estimator, header);
-////            pubTF(estimator, header);
-////            pubKeyframe(estimator);
-////            if (relo_msg != NULL)
-////                pubRelocalization(estimator);
-//            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
-//        }
-////        m_estimator.unlock();
-//        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
-//        mBuf.lock();
-//        m_state.lock();
-////        if (solver_flag == NON_LINEAR)
-////            update();
-//        m_state.unlock();
-//        mBuf.unlock();
+//            pubOdometry(estimator, header);
+//            pubKeyPoses(estimator, header);
+//            pubCameraPose(estimator, header);
+//            pubPointCloud(estimator, header);
+//            pubTF(estimator, header);
+//            pubKeyframe(estimator);
+//            if (relo_msg != NULL)
+//                pubRelocalization(estimator);
+            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
+        }
+//        m_estimator.unlock();
+        //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
+        mBuf.lock();
+        m_state.lock();
+//        if (solver_flag == NON_LINEAR)
+//            update();
+        m_state.unlock();
+        mBuf.unlock();
 	}
 } // process_lio
 
@@ -3557,7 +3595,7 @@ int main(int argc, char **argv)
 
     // --------------------------------- 订阅后端数据 ---------------------------------
 //	 ros::Subscriber subCenters = nh.subscribe<sensor_msgs::PointCloud2>("/Center_BA", 100, centerHandler);
-	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/ground_BA", 100, SurfHandler);
+	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/offground_BA", 100, SurfHandler);
     ros::Subscriber subEdge = nh.subscribe<sensor_msgs::PointCloud2>("/Edge_BA", 100, EdgeHandler);
 
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/BALM_mapped_to_init", 100, laserOdometryHandler);
@@ -3567,6 +3605,7 @@ int main(int argc, char **argv)
     ros::Subscriber subImu = nh.subscribe<sensor_msgs::Imu>("imu_raw", 2000, imuHandler, ros::TransportHints().tcpNoDelay());
 
     // ------------------------------------------------------------------
+    pubOdomAftLio = nh.advertise<nav_msgs::Odometry>("/odom_aft_lio", 100);
 //	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
 //	pubPathAftPGO = nh.advertise<nav_msgs::Path>("/aft_pgo_path", 100);
 
