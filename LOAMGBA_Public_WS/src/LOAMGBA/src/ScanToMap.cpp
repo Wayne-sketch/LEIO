@@ -892,7 +892,6 @@ int main(int argc, char **argv)
     // 订阅质心
     ros::Subscriber subCenter = nh.subscribe<sensor_msgs::PointCloud2>("/center", 100, centerHandler);
 
-
     // submap所在cube中的点云，附近5帧组成的降采样子地图 for rviz
     pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 100);
     // 所欲cube中的点云，所有帧组成的点云地图

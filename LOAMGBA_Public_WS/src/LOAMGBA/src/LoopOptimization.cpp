@@ -58,6 +58,7 @@
 #include "factor/ImuFactor.hpp"
 #include "imu_processor/ImuInitializer.hpp"
 #include "imu_processor/IntegrationBase.hpp"
+#define USE_CORNER //使用角点
 typedef pcl::PointXYZI PointT;
 typedef typename pcl::PointCloud<PointT> PointCloud;
 typedef typename pcl::PointCloud<PointT>::Ptr PointCloudPtr;
@@ -75,7 +76,8 @@ using std::shared_ptr;
 using std::unique_ptr;
 //todo 全局变量、类型定义 能直接初始化在定义时初始化 不能的放在main函数中初始化
 //ros消息发布
-ros::Publisher pubOdomAftLio;
+ros::Publisher pubOdomAftLio, pubLaserAfterLioPath, pubTransformSum;
+nav_msgs::Path laserAfterLioPath, laserTransformSumPath;
 // IMU参数 + 外参
 double imuAccNoise = 3.9939570888238808e-03;          // 加速度噪声标准差
 double imuGyrNoise = 1.5636343949698187e-03;          // 角速度噪声标准差
@@ -217,7 +219,7 @@ enum EstimatorStageFlag {
 };
 //需要把变量都改一下
 struct EstimatorConfig {
-  size_t window_size = 7;
+  size_t window_size = 10;
   size_t opt_window_size = 5;
   int init_window_factor = 1;
   int estimate_extrinsic = 1; //not used
@@ -1965,7 +1967,6 @@ void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
 
 //处理完lidar_info消息后做LIO
 void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &header) {
-
   ROS_DEBUG(">>>>>>> new laser odom coming <<<<<<<");
 
   ++laser_odom_recv_count_;
@@ -2021,7 +2022,6 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   //todo ?
   opt_matP_.push(matP_.cast<double>());
   ///< optimization buffers
-
   if (estimator_config_.run_optimization) {
     switch (stage_flag_) {
       case NOT_INITED: {
@@ -2108,7 +2108,10 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
               DLOG(INFO) << "TEST all_laser_transforms " << i << ": " << all_laser_transforms_[i].second.transform;
             }
 
+            TicToc t_solveOptimization;
             SolveOptimization();
+			double t_solve = t_solveOptimization.toc();
+            std::cout << "SolveOptimization() time:" << t_solve << std::endl;
 
             SlideWindow();
 
@@ -2133,10 +2136,10 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 
             // WARNING
 
-          } else {
+          } else { //如果没有初始化成功
             SlideWindow();
           }
-        } else {
+        } else { //如果滑窗没满
           DLOG(INFO) << "Ps size: " << Ps_.size();
           DLOG(INFO) << "pre size: " << pre_integrations_.size();
           DLOG(INFO) << "all_laser_transforms_ size: " << all_laser_transforms_.size();
@@ -2153,11 +2156,15 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 
         break;
       }
-      case INITED: {
+      case INITED: { //非线性优化阶段
         if (opt_point_coeff_map_.size() == estimator_config_.opt_window_size + 1) {
           //这里去掉了imu信息 点云去畸变
           DLOG(INFO) << ">>>>>>> solving optimization <<<<<<<";
+
+          TicToc t_solveOptimization;
           SolveOptimization();
+		  double t_solve = t_solveOptimization.toc();
+          std::cout << "optimization period SolveOptimization() time:" << t_solve << std::endl;
 
           if (!opt_point_coeff_mask_.first()) {
             UpdateMapDatabase(opt_corner_stack_.first(),
@@ -2177,28 +2184,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //      PublishResults();
         SlideWindow();
 
-        {
-        	//发布pivot帧位姿
-        	nav_msgs::Odometry odomAftLioPivot;
-        	odomAftLioPivot.header.frame_id = "camera_init";
-        	int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
-        	odomAftLioPivot.header.stamp = Headers_[pivot_idx + 1].stamp;
-          	odomAftLioPivot.header.seq += 1;
-          	Twist<double> transform_lb = transform_lb_.cast<double>();
-          	Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
-          	Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
-          	Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
-          	Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
-          	Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
-          	odomAftLioPivot.pose.pose.orientation.x = transform_pivot.rot.x();
-          	odomAftLioPivot.pose.pose.orientation.y = transform_pivot.rot.y();
-          	odomAftLioPivot.pose.pose.orientation.z = transform_pivot.rot.z();
-          	odomAftLioPivot.pose.pose.orientation.w = transform_pivot.rot.w();
-          	odomAftLioPivot.pose.pose.position.x = transform_pivot.pos.x();
-          	odomAftLioPivot.pose.pose.position.y = transform_pivot.pos.y();
-          	odomAftLioPivot.pose.pose.position.z = transform_pivot.pos.z();
-          	pubOdomAftLio.publish(odomAftLioPivot);
-
+//        {
 //          int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
 //          local_odom_.header.stamp = Headers_[pivot_idx + 1].stamp;
 //          local_odom_.header.seq += 1;
@@ -2266,7 +2252,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
 //              << laser_odom_.pose.pose.orientation.z << " "
 //              << laser_odom_.pose.pose.orientation.w << std::endl;
 //          pose1.close();
-        }
+//        }
 
         break;
       }//end INITED
@@ -2274,7 +2260,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
         break;
       }
 
-    }
+    }//end switch
   }
   // std::cout << "发布wi_trans_" <<std::endl;
 //  wi_trans_.setRotation(tf::Quaternion{Q_WI_.x(), Q_WI_.y(), Q_WI_.z(), Q_WI_.w()});
@@ -2296,6 +2282,17 @@ void LidarInfoHandler(const LidarInfo &lidar_info) {
     transform_sum_.rot.y() = lidar_info.laser_odometry_->pose.pose.orientation.y;
     transform_sum_.rot.z() = lidar_info.laser_odometry_->pose.pose.orientation.z;
     transform_sum_.rot.w() = lidar_info.laser_odometry_->pose.pose.orientation.w;
+  }
+
+  {
+    //把transform_sum_发布轨迹看一下
+    geometry_msgs::PoseStamped laserTransformSumPose;
+    laserTransformSumPose.header = lidar_info.laser_odometry_->header;
+    laserTransformSumPose.pose = lidar_info.laser_odometry_->pose.pose;
+    laserTransformSumPath.header.stamp = lidar_info.laser_odometry_->header.stamp;
+    laserTransformSumPath.header.frame_id = "camera_init";
+    laserTransformSumPath.poses.push_back(laserTransformSumPose);
+    pubTransformSum.publish(laserTransformSumPath);
   }
 
   //点云取出来
@@ -3158,7 +3155,11 @@ void Process() {
 void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &header)
 {
     //1. process lidar_info
+//    TicToc t_lidarinfohandler;
   	LidarInfoHandler(lidar_info);
+        //平均0.5s以内
+//	double t_lidarinfo = t_lidarinfohandler.toc();
+//    std::cout << "LidarInfoHandler(lidar_info) Time:" << t_lidarinfo << std::endl;
 
   	if (stage_flag_ == INITED) {
     	Transform trans_prev(Eigen::Quaterniond(Rs_[estimator_config_.window_size - 1]).cast<float>(),
@@ -3198,7 +3199,12 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
 
     //获取scan to map优化后的当前帧位姿
   	Transform transform_to_init_ = transform_aft_mapped_;
+//        TicToc t_processLaserOdom;
+        //这里时间太久
   	ProcessLaserOdom(transform_to_init_, header);
+
+//		double t_laserodom = t_processLaserOdom.toc();
+//    	std::cout << "ProcessLaserOdom(transform_to_init_, header) Time:" << t_laserodom << std::endl;
 
 // NOTE: will be updated in PointMapping's OptimizeTransformTobeMapped
 //  if (stage_flag_ == INITED && !estimator_config_.imu_factor) {
@@ -3468,23 +3474,55 @@ void process_lio()
                 }
             }
 
-            TicToc t_s;
+//            TicToc t_s;
             processLidarInfo(lidar_info, lidar_info.laser_odometry_->header);
 
-            double whole_t = t_s.toc();
-//            printStatistics(estimator, whole_t);
-//            std_msgs::Header header = img_msg->header;
-//            header.frame_id = "world";
-//
-//            pubOdometry(estimator, header);
-//            pubKeyPoses(estimator, header);
-//            pubCameraPose(estimator, header);
-//            pubPointCloud(estimator, header);
-//            pubTF(estimator, header);
-//            pubKeyframe(estimator);
-//            if (relo_msg != NULL)
-//                pubRelocalization(estimator);
-            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
+//            double whole_t = t_s.toc();
+//            std::cout << "processLidarInfo time : " << whole_t << std::endl;
+            {
+            	//发布pivot帧位姿
+        		nav_msgs::Odometry odomAftLioPivot;
+        		odomAftLioPivot.header.frame_id = "camera_init";
+        		int pivot_idx = estimator_config_.window_size - estimator_config_.opt_window_size;
+        		odomAftLioPivot.header.stamp = Headers_[pivot_idx + 1].stamp;
+          		odomAftLioPivot.header.seq += 1;
+          		Twist<double> transform_lb = transform_lb_.cast<double>();
+          		Eigen::Vector3d Ps_pivot = Ps_[pivot_idx];
+          		Eigen::Matrix3d Rs_pivot = Rs_[pivot_idx];
+          		Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
+          		Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
+          		Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
+          		odomAftLioPivot.pose.pose.orientation.x = transform_pivot.rot.x();
+          		odomAftLioPivot.pose.pose.orientation.y = transform_pivot.rot.y();
+          		odomAftLioPivot.pose.pose.orientation.z = transform_pivot.rot.z();
+          		odomAftLioPivot.pose.pose.orientation.w = transform_pivot.rot.w();
+          		odomAftLioPivot.pose.pose.position.x = transform_pivot.pos.x();
+          		odomAftLioPivot.pose.pose.position.y = transform_pivot.pos.y();
+          		odomAftLioPivot.pose.pose.position.z = transform_pivot.pos.z();
+          		pubOdomAftLio.publish(odomAftLioPivot);
+
+            	//发布轨迹
+            	geometry_msgs::PoseStamped laserAfterLioPose;
+            	laserAfterLioPose.header = odomAftLioPivot.header;
+            	laserAfterLioPose.pose = odomAftLioPivot.pose.pose;
+            	laserAfterLioPath.header.stamp = odomAftLioPivot.header.stamp;
+            	laserAfterLioPath.header.frame_id = "camera_init";
+            	laserAfterLioPath.poses.push_back(laserAfterLioPose);
+            	pubLaserAfterLioPath.publish(laserAfterLioPath);
+            }
+////            printStatistics(estimator, whole_t);
+////            std_msgs::Header header = img_msg->header;
+////            header.frame_id = "world";
+////
+////            pubOdometry(estimator, header);
+////            pubKeyPoses(estimator, header);
+////            pubCameraPose(estimator, header);
+////            pubPointCloud(estimator, header);
+////            pubTF(estimator, header);
+////            pubKeyframe(estimator);
+////            if (relo_msg != NULL)
+////                pubRelocalization(estimator);
+//            //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
         }
 //        m_estimator.unlock();
         //todo 这里lio-mapping额外加了一个thread_mutex锁 好像没有用
@@ -3595,7 +3633,7 @@ int main(int argc, char **argv)
 
     // --------------------------------- 订阅后端数据 ---------------------------------
 //	 ros::Subscriber subCenters = nh.subscribe<sensor_msgs::PointCloud2>("/Center_BA", 100, centerHandler);
-	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/offground_BA", 100, SurfHandler);
+	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/ground_BA", 100, SurfHandler);
     ros::Subscriber subEdge = nh.subscribe<sensor_msgs::PointCloud2>("/Edge_BA", 100, EdgeHandler);
 
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/BALM_mapped_to_init", 100, laserOdometryHandler);
@@ -3606,6 +3644,9 @@ int main(int argc, char **argv)
 
     // ------------------------------------------------------------------
     pubOdomAftLio = nh.advertise<nav_msgs::Odometry>("/odom_aft_lio", 100);
+    //发布优化轨迹
+    pubLaserAfterLioPath = nh.advertise<nav_msgs::Path>("/aft_lio_pivot_path", 100);
+    pubTransformSum = nh.advertise<nav_msgs::Path>("/transform_sum_path", 100);
 //	pubOdomAftPGO = nh.advertise<nav_msgs::Odometry>("/aft_pgo_odom", 100);
 //	pubPathAftPGO = nh.advertise<nav_msgs::Path>("/aft_pgo_path", 100);
 
