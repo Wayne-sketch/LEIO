@@ -657,7 +657,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -672,7 +672,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -805,7 +805,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 19.73822784423828
+      Distance: 236.09690856933594
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -813,9 +813,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 111.59768676757812
-        Y: -5.271675109863281
-        Z: 1.5591105222702026
+        X: 54.37502670288086
+        Y: 44.6575927734375
+        Z: 1.5590325593948364
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -864,4 +864,4 @@ Window Geometry:
     collapsed: false
   Width: 1909
   X: 575
-  Y: 61
+  Y: 27

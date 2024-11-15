@@ -257,33 +257,34 @@ EstimatorStageFlag stage_flag_ = NOT_INITED;
 EstimatorConfig estimator_config_;
 
 //所有的buffer
-CircularBuffer<leio::PairTimeLaserTransform> all_laser_transforms_{estimator_config_.window_size + 1};
+//todo CircularBuffer有问题 一个一个改
+std::vector<leio::PairTimeLaserTransform> all_laser_transforms_(estimator_config_.window_size + 1);
 //下面的buffer存的是IMU系位姿
-CircularBuffer<Vector3d> Ps_{estimator_config_.window_size + 1};
-CircularBuffer<Matrix3d> Rs_{estimator_config_.window_size + 1};
-CircularBuffer<Vector3d> Vs_{estimator_config_.window_size + 1};
-CircularBuffer<Vector3d> Bas_{estimator_config_.window_size + 1};
-CircularBuffer<Vector3d> Bgs_{estimator_config_.window_size + 1};
-CircularBuffer<size_t> size_surf_stack_{estimator_config_.window_size + 1};
-CircularBuffer<size_t> size_corner_stack_{estimator_config_.window_size + 1};
+std::vector<Vector3d> Ps_(estimator_config_.window_size + 1);
+std::vector<Matrix3d> Rs_(estimator_config_.window_size + 1);
+std::vector<Vector3d> Vs_(estimator_config_.window_size + 1);
+std::vector<Vector3d> Bas_(estimator_config_.window_size + 1);
+std::vector<Vector3d> Bgs_(estimator_config_.window_size + 1);
+std::vector<size_t> size_surf_stack_(estimator_config_.window_size + 1);
+std::vector<size_t> size_corner_stack_(estimator_config_.window_size + 1);
 //endregion
-CircularBuffer<std_msgs::Header> Headers_{estimator_config_.window_size + 1};
-CircularBuffer<vector<double> > dt_buf_{estimator_config_.window_size + 1};
-CircularBuffer<vector<Vector3d> > linear_acceleration_buf_{estimator_config_.window_size + 1};
-CircularBuffer<vector<Vector3d> > angular_velocity_buf_{estimator_config_.window_size + 1};
-CircularBuffer<shared_ptr<leio::IntegrationBase> > pre_integrations_{estimator_config_.window_size + 1};
-CircularBuffer<PointCloudPtr> surf_stack_{estimator_config_.window_size + 1};
-CircularBuffer<PointCloudPtr> corner_stack_{estimator_config_.window_size + 1};
-CircularBuffer<PointCloudPtr> full_stack_{estimator_config_.window_size + 1};
+std::vector<std_msgs::Header> Headers_(estimator_config_.window_size + 1);
+std::vector<vector<double> > dt_buf_(estimator_config_.window_size + 1);
+std::vector<vector<Vector3d> > linear_acceleration_buf_(estimator_config_.window_size + 1);
+std::vector<vector<Vector3d> > angular_velocity_buf_(estimator_config_.window_size + 1);
+std::vector<shared_ptr<leio::IntegrationBase> > pre_integrations_(estimator_config_.window_size + 1);
+std::vector<PointCloudPtr> surf_stack_(estimator_config_.window_size + 1);
+std::vector<PointCloudPtr> corner_stack_(estimator_config_.window_size + 1);
+std::vector<PointCloudPtr> full_stack_(estimator_config_.window_size + 1);
 ///> optimization buffers (ProcessLaserOdom中LIO滑窗优化用到的)
-CircularBuffer<bool> opt_point_coeff_mask_{estimator_config_.opt_window_size + 1};
-CircularBuffer<ScorePointCoeffMap> opt_point_coeff_map_{estimator_config_.opt_window_size + 1};
-CircularBuffer<CubeCenter> opt_cube_centers_{estimator_config_.opt_window_size + 1};
-CircularBuffer<Transform> opt_transforms_{estimator_config_.opt_window_size + 1};
-CircularBuffer<vector<size_t> > opt_valid_idx_{estimator_config_.opt_window_size + 1};
-CircularBuffer<PointCloudPtr> opt_corner_stack_{estimator_config_.opt_window_size + 1};
-CircularBuffer<PointCloudPtr> opt_surf_stack_{estimator_config_.opt_window_size + 1};
-CircularBuffer<Eigen::Matrix<double, 6, 6>> opt_matP_{estimator_config_.opt_window_size + 1};
+std::vector<bool> opt_point_coeff_mask_(estimator_config_.opt_window_size + 1);
+std::vector<ScorePointCoeffMap> opt_point_coeff_map_(estimator_config_.opt_window_size + 1);
+std::vector<CubeCenter> opt_cube_centers_(estimator_config_.opt_window_size + 1);
+std::vector<Transform> opt_transforms_(estimator_config_.opt_window_size + 1);
+std::vector<vector<size_t> > opt_valid_idx_(estimator_config_.opt_window_size + 1);
+std::vector<PointCloudPtr> opt_corner_stack_(estimator_config_.opt_window_size + 1);
+std::vector<PointCloudPtr> opt_surf_stack_(estimator_config_.opt_window_size + 1);
+std::vector<Eigen::Matrix<double, 6, 6>> opt_matP_(estimator_config_.opt_window_size + 1);
 ///< optimization buffers
 //todo 需要追踪一下cir_buf_count_
 size_t cir_buf_count_ = 0;
@@ -295,7 +296,7 @@ struct StampedTransform {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 //用于点云去畸变
-CircularBuffer<StampedTransform> imu_stampedtransforms{100};
+std::vector<StampedTransform> imu_stampedtransforms(100);
 Transform transform_tobe_mapped_bef_;
 Transform transform_es_;
 //double赋值给float需要cast
@@ -375,31 +376,30 @@ void processIMU(double dt,
 
     // NOTE: Do not update tmp_pre_integration_ until first laser comes
   	if (cir_buf_count_ != 0) {
+    	tmp_pre_integration_->push_back(dt, linear_acceleration, angular_velocity);
 
-    tmp_pre_integration_->push_back(dt, linear_acceleration, angular_velocity);
+    	dt_buf_[cir_buf_count_].push_back(dt);
+    	linear_acceleration_buf_[cir_buf_count_].push_back(linear_acceleration);
+    	angular_velocity_buf_[cir_buf_count_].push_back(angular_velocity);
 
-    dt_buf_[cir_buf_count_].push_back(dt);
-    linear_acceleration_buf_[cir_buf_count_].push_back(linear_acceleration);
-    angular_velocity_buf_[cir_buf_count_].push_back(angular_velocity);
+    	size_t j = cir_buf_count_;
+    	Vector3d un_acc_0 = Rs_[j] * (acc_last_ - Bas_[j]) + g_vec_;
+    	Vector3d un_gyr = 0.5 * (gyr_last_ + angular_velocity) - Bgs_[j];
+    	Rs_[j] *= DeltaQ(un_gyr * dt).toRotationMatrix();
+    	Vector3d un_acc_1 = Rs_[j] * (linear_acceleration - Bas_[j]) + g_vec_;
+    	Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
+    	Ps_[j] += dt * Vs_[j] + 0.5 * dt * dt * un_acc;
+    	Vs_[j] += dt * un_acc;
 
-    size_t j = cir_buf_count_;
-    Vector3d un_acc_0 = Rs_[j] * (acc_last_ - Bas_[j]) + g_vec_;
-    Vector3d un_gyr = 0.5 * (gyr_last_ + angular_velocity) - Bgs_[j];
-    Rs_[j] *= DeltaQ(un_gyr * dt).toRotationMatrix();
-    Vector3d un_acc_1 = Rs_[j] * (linear_acceleration - Bas_[j]) + g_vec_;
-    Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
-    Ps_[j] += dt * Vs_[j] + 0.5 * dt * dt * un_acc;
-    Vs_[j] += dt * un_acc;
-
-    StampedTransform imu_tt;
-    imu_tt.time = header.stamp.toSec();
-    imu_tt.transform.pos = Ps_[j].cast<float>();
-    imu_tt.transform.rot = Eigen::Quaternionf(Rs_[j].cast<float>());
-    imu_stampedtransforms.push(imu_tt);
+    	StampedTransform imu_tt;
+    	imu_tt.time = header.stamp.toSec();
+    	imu_tt.transform.pos = Ps_[j].cast<float>();
+    	imu_tt.transform.rot = Eigen::Quaternionf(Rs_[j].cast<float>());
+    	imu_stampedtransforms.push(imu_tt);
 //    DLOG(INFO) << imu_tt.transform;
-  }
-  acc_last_ = linear_acceleration;
-  gyr_last_ = angular_velocity;
+  	}
+  	acc_last_ = linear_acceleration;
+  	gyr_last_ = angular_velocity;
 
 //  if (stage_flag_ == INITED) {
 //    predict_odom_.header.stamp = header.stamp;
@@ -464,27 +464,28 @@ void CalculateFeatures(const pcl::KdTreeFLANN<PointT>::Ptr &kdtree_surf_from_map
                                   vector<unique_ptr<Feature>> &features) {
 #endif
 
-  PointT point_sel, point_ori, point_proj, coeff1, coeff2;
-  if (!estimator_config_.keep_features) {
-    features.clear();
-  }
+  	PointT point_sel, point_ori, point_proj, coeff1, coeff2;
+  	//todo 目前features clear
+        if (!estimator_config_.keep_features) {
+    	features.clear();
+  	}
 
-  std::vector<int> point_search_idx(5, 0);
-  std::vector<float> point_search_sq_dis(5, 0);
-  Eigen::Matrix<float, 5, 3> mat_A0;
-  Eigen::Matrix<float, 5, 1> mat_B0;
-  Eigen::Vector3f mat_X0;
-  Eigen::Matrix3f mat_A1;
-  Eigen::Matrix<float, 1, 3> mat_D1;
-  Eigen::Matrix3f mat_V1;
+  	std::vector<int> point_search_idx(5, 0);
+  	std::vector<float> point_search_sq_dis(5, 0);
+  	Eigen::Matrix<float, 5, 3> mat_A0;
+  	Eigen::Matrix<float, 5, 1> mat_B0;
+  	Eigen::Vector3f mat_X0;
+  	Eigen::Matrix3f mat_A1;
+  	Eigen::Matrix<float, 1, 3> mat_D1;
+  	Eigen::Matrix3f mat_V1;
 
-  mat_A0.setZero();
-  mat_B0.setConstant(-1);
-  mat_X0.setZero();
+  	mat_A0.setZero();
+  	mat_B0.setConstant(-1);
+  	mat_X0.setZero();
 
-  mat_A1.setZero();
-  mat_D1.setZero();
-  mat_V1.setZero();
+  	mat_A1.setZero();
+  	mat_D1.setZero();
+  	mat_V1.setZero();
 
   PointCloud laser_cloud_ori;
   PointCloud coeff_sel;
@@ -494,10 +495,11 @@ void CalculateFeatures(const pcl::KdTreeFLANN<PointT>::Ptr &kdtree_surf_from_map
   //i到pivot帧的相对位姿
   const Transform &transform_to_local = local_transform;
   size_t surf_points_size = origin_surf_points->points.size();
-
+//	std::cout << "surf_points_size: " << surf_points_size << std::endl;
 #ifdef USE_CORNER
   const PointCloudPtr &origin_corner_points = corner_stack;
   size_t corner_points_size = origin_corner_points->points.size();
+//  	std::cout << "corner_points_size: " << corner_points_size << std::endl;
 #endif
 
 //    DLOG(INFO) << "transform_to_local: " << transform_to_local;
@@ -854,7 +856,8 @@ void CalculateLaserOdom(const pcl::KdTreeFLANN<PointT>::Ptr &kdtree_surf_from_ma
 
 //lio滑窗构建局部地图 填充feature_frames 里面存了特征拟合参数 同时calculateOdom更新了一次
 void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
-	feature_frames.clear();
+
+  feature_frames.clear();
 
 	TicToc t_build_map;
   //滑窗内点云放pivot系下作为局部地图
@@ -923,56 +926,56 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
     	}//第一个局部地图初始化完毕
 
     	for (int i = 0; i < estimator_config_.window_size + 1; ++i) {
-      	  Eigen::Vector3d Ps_i = Ps_[i];
-      	  Eigen::Matrix3d Rs_i = Rs_[i];
+      		Eigen::Vector3d Ps_i = Ps_[i];
+      		Eigen::Matrix3d Rs_i = Rs_[i];
 
-      	  Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
-      	  Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
-          //lidar位姿
-    	  Twist<double> transform_li = Twist<double>(rot_li, pos_li);
-      	  //i到pivot相对位姿
-          Eigen::Affine3f transform_pivot_i = (transform_pivot.inverse() * transform_li).cast<float>().transform();
+      	  	Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
+      	  	Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
+          	//lidar位姿
+    	  	Twist<double> transform_li = Twist<double>(rot_li, pos_li);
+      	  	//i到pivot相对位姿
+          	Eigen::Affine3f transform_pivot_i = (transform_pivot.inverse() * transform_li).cast<float>().transform();
 
-      	  Transform local_transform = transform_pivot_i;
-      	  local_transforms.push_back(local_transform);
-          //pivot前帧不处理
-      	  if (i < pivot_idx) {
-        	continue;
-      	  }
+      	  	Transform local_transform = transform_pivot_i;
+      	  	local_transforms.push_back(local_transform);
+          	//pivot前帧不处理
+      	  	if (i < pivot_idx) {
+        		continue;
+      	  	}
 
-      	PointCloud transformed_cloud_surf, transformed_cloud_corner;
+      		PointCloud transformed_cloud_surf, transformed_cloud_corner;
 
-      	// NOTE: exclude the latest one 最新帧不处理
-      	if (i != estimator_config_.window_size) {
-            //pivot帧放进来
-        	if (i == pivot_idx) {
-          	  *local_surf_points_ptr_ += *(surf_stack_[i]);
-//	          down_size_filter_surf_.setInputCloud(local_surf_points_ptr_);
-//	          down_size_filter_surf_.filter(transformed_cloud_surf);
-//	          *local_surf_points_ptr_ = transformed_cloud_surf;
+      		// NOTE: exclude the latest one 最新帧不处理
+      		if (i != estimator_config_.window_size) {
+            	//pivot帧放进来
+        		if (i == pivot_idx) {
+          	  		*local_surf_points_ptr_ += *(surf_stack_[i]);
+//	          		down_size_filter_surf_.setInputCloud(local_surf_points_ptr_);
+//	          		down_size_filter_surf_.filter(transformed_cloud_surf);
+//	          		*local_surf_points_ptr_ = transformed_cloud_surf;
 #ifdef USE_CORNER
-          	  *local_corner_points_ptr_ += *(corner_stack_[i]);
+          	  		*local_corner_points_ptr_ += *(corner_stack_[i]);
 #endif
-          	  continue;
-        	}
+          	  		continue;
+        		}
 
-          //pivot后面的帧变换到pivot系下加入到局部地图点云中
-        	pcl::transformPointCloud(*(surf_stack_[i]), transformed_cloud_surf, transform_pivot_i);
+          		//pivot后面的帧变换到pivot系下加入到局部地图点云中
+        		pcl::transformPointCloud(*(surf_stack_[i]), transformed_cloud_surf, transform_pivot_i);
 #ifdef USE_CORNER
-        	pcl::transformPointCloud(*(corner_stack_[i]), transformed_cloud_corner, transform_pivot_i);
+        		pcl::transformPointCloud(*(corner_stack_[i]), transformed_cloud_corner, transform_pivot_i);
 #endif
-        	//endregion
-        	for (int p_idx = 0; p_idx < transformed_cloud_surf.size(); ++p_idx) {
-          	  transformed_cloud_surf[p_idx].intensity = i;
-        	}
-        	*local_surf_points_ptr_ += transformed_cloud_surf;
+        		//endregion
+        		for (int p_idx = 0; p_idx < transformed_cloud_surf.size(); ++p_idx) {
+          	  		transformed_cloud_surf[p_idx].intensity = i;
+        		}
+        		*local_surf_points_ptr_ += transformed_cloud_surf;
 #ifdef USE_CORNER
-        	for (int p_idx = 0; p_idx < transformed_cloud_corner.size(); ++p_idx) {
-          	  transformed_cloud_corner[p_idx].intensity = i;
-        	}
-        	*local_corner_points_ptr_ += transformed_cloud_corner;
+        		for (int p_idx = 0; p_idx < transformed_cloud_corner.size(); ++p_idx) {
+          	  		transformed_cloud_corner[p_idx].intensity = i;
+        		}
+        		*local_corner_points_ptr_ += transformed_cloud_corner;
 #endif
-      	}
+      		}
       }
 
     	DLOG(INFO) << "local_surf_points_ptr_->size() bef: " << local_surf_points_ptr_->size();
@@ -987,62 +990,65 @@ void BuildLocalMap(vector<FeaturePerFrame> &feature_frames) {
 #endif
 	 }
 
+  std::cout << "t_build_map cost: " << t_build_map.toc() << " ms" << std::endl;
   ROS_DEBUG_STREAM("t_build_map cost: " << t_build_map.toc() << " ms");
   DLOG(INFO) << "t_build_map cost: " << t_build_map.toc() << " ms";
 
+TicToc t_kdtree;
+
   pcl::KdTreeFLANN<PointT>::Ptr kdtree_surf_from_map(new pcl::KdTreeFLANN<PointT>());
   kdtree_surf_from_map->setInputCloud(local_surf_points_filtered_ptr_);
-
 #ifdef USE_CORNER
   pcl::KdTreeFLANN<PointT>::Ptr kdtree_corner_from_map(new pcl::KdTreeFLANN<PointT>());
   kdtree_corner_from_map->setInputCloud(local_corner_points_filtered_ptr_);
 #endif
-
+std::cout << "t_kdtree cost: " << t_kdtree.toc() << " ms" << std::endl;
 	for (int idx = 0; idx < estimator_config_.window_size + 1; ++idx) {
-    FeaturePerFrame feature_per_frame;
-    vector<unique_ptr<Feature>> features;
-//  vector<unique_ptr<Feature>> &features = feature_per_frame.features;
+    	FeaturePerFrame feature_per_frame;
+    	vector<unique_ptr<Feature>> features;
+//  	vector<unique_ptr<Feature>> &features = feature_per_frame.features;
 
-    TicToc t_features;
-    //pivot以后的帧计算特征
-    if (idx > pivot_idx) {
-      if (idx != estimator_config_.window_size || !estimator_config_.imu_factor) {
+    	TicToc t_features;
+    	//pivot以后的帧计算特征
+    	if (idx > pivot_idx) {
+      		if (idx != estimator_config_.window_size || !estimator_config_.imu_factor) {
+                  //todo 这里pivot_idx+1帧会越来越慢 传进去的点云数量会越来越庞大
+				TicToc t_fea;;
 #ifdef USE_CORNER
-        CalculateFeatures(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
-                         kdtree_corner_from_map, local_corner_points_filtered_ptr_, corner_stack_[idx],
-                          local_transforms[idx], features);
+        		CalculateFeatures(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
+                         		kdtree_corner_from_map, local_corner_points_filtered_ptr_, corner_stack_[idx],
+                          		local_transforms[idx], features);
 #else
 //kdtree 和 局部地图点云是匹配的
-        CalculateFeatures(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
-                          local_transforms[idx], features);
+        		CalculateFeatures(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
+                          		local_transforms[idx], features);
 #endif
-      } else {
-        DLOG(INFO) << "local_transforms[idx] bef" << local_transforms[idx];
-
+                std::cout << "t_fea cost: " << t_fea.toc() << " ms" << std::endl;
+      		} else {
+        		DLOG(INFO) << "local_transforms[idx] bef" << local_transforms[idx];
+				TicToc t_odom;
 #ifdef USE_CORNER
-        CalculateLaserOdom(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
-                           kdtree_corner_from_map, local_corner_points_filtered_ptr_, corner_stack_[idx],
-                           local_transforms[idx], features);
+        		CalculateLaserOdom(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
+                           	kdtree_corner_from_map, local_corner_points_filtered_ptr_, corner_stack_[idx],
+                           	local_transforms[idx], features);
 #else
 //更新了local_transforms[idx]
-        CalculateLaserOdom(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
-                           local_transforms[idx], features);
+        		CalculateLaserOdom(kdtree_surf_from_map, local_surf_points_filtered_ptr_, surf_stack_[idx],
+                           	local_transforms[idx], features);
 #endif
-
-        DLOG(INFO) << "local_transforms[idx] aft" << local_transforms[idx];
-      }
-    } else { //pivot及之前的帧不处理
+    			std::cout << "t_odom cost: " << t_odom.toc() << " ms" << std::endl;
+        		DLOG(INFO) << "local_transforms[idx] aft" << local_transforms[idx];
+      		}
+    	} else { //pivot及之前的帧不处理
       // NOTE: empty features
-    }
+    	}
 
-    feature_per_frame.id = idx;
-//    feature_per_frame.features = std::move(features);
-    feature_per_frame.features.assign(make_move_iterator(features.begin()), make_move_iterator(features.end()));
-    feature_frames.push_back(std::move(feature_per_frame));
-
-    ROS_DEBUG_STREAM("feature cost: " << t_features.toc() << " ms");
-  }
-
+    	feature_per_frame.id = idx;
+//    	feature_per_frame.features = std::move(features);
+    	feature_per_frame.features.assign(make_move_iterator(features.begin()), make_move_iterator(features.end()));
+    	feature_frames.push_back(std::move(feature_per_frame));
+    	ROS_DEBUG_STREAM("feature cost: " << t_features.toc() << " ms");
+  	}
 }
 
 void VectorToDouble() {
@@ -1718,10 +1724,13 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       extract.setNegative(true);
       extract.filter(filtered_surf_points);
 
+      for(int j = 0; j < surf_stack_.size(); ++j) {
+        std::cout << "surf_stack_[j]->size():" << surf_stack_[j]->size() << std::endl;
+      }
+
       filtered_surf_points += *(surf_stack_[i]);
 
       *(surf_stack_[i]) = filtered_surf_points;
-
 #ifdef USE_CORNER
       pcl::transformPointCloud(*(corner_stack_[pivot_idx]), *transformed_cloud_corner_ptr, transform_i_pivot);
       pcl::PointIndices::Ptr inliers_corner(new pcl::PointIndices());
@@ -1741,11 +1750,13 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
     }
   }
 
+  //todo 这里滑窗有问题 没有滑动
   dt_buf_.push(vector<double>());
   linear_acceleration_buf_.push(vector<Vector3d>());
   angular_velocity_buf_.push(vector<Vector3d>());
 
 //  Headers_.push(Headers_[cir_buf_count_]);
+  //todo 原版为什么这样写？
   Ps_.push(Ps_[cir_buf_count_]);
   Vs_.push(Vs_[cir_buf_count_]);
   Rs_.push(Rs_[cir_buf_count_]);
@@ -2108,10 +2119,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
               DLOG(INFO) << "TEST all_laser_transforms " << i << ": " << all_laser_transforms_[i].second.transform;
             }
 
-            TicToc t_solveOptimization;
             SolveOptimization();
-			double t_solve = t_solveOptimization.toc();
-            std::cout << "SolveOptimization() time:" << t_solve << std::endl;
 
             SlideWindow();
 
@@ -2161,10 +2169,8 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
           //这里去掉了imu信息 点云去畸变
           DLOG(INFO) << ">>>>>>> solving optimization <<<<<<<";
 
-          TicToc t_solveOptimization;
+
           SolveOptimization();
-		  double t_solve = t_solveOptimization.toc();
-          std::cout << "optimization period SolveOptimization() time:" << t_solve << std::endl;
 
           if (!opt_point_coeff_mask_.first()) {
             UpdateMapDatabase(opt_corner_stack_.first(),
