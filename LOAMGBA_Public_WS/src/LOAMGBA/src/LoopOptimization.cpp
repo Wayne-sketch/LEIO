@@ -193,6 +193,7 @@ Transform transform_aft_mapped_; //scan to map后的位姿
 
 float scan_period_; //not used
 float time_factor_; //not used
+//每几帧处理一次
 const int num_stack_frames_ = 1;
 const int num_map_frames_ = 5;
 long frame_count_ = num_stack_frames_ - 1;   ///< number of processed frames
@@ -1695,6 +1696,7 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       Eigen::Quaterniond rot_pivot(Rs_pivot * transform_lb.rot.inverse());
       Eigen::Vector3d pos_pivot = Ps_pivot - rot_pivot * transform_lb.pos;
 
+      //pivot帧位姿
       Twist<double> transform_pivot = Twist<double>(rot_pivot, pos_pivot);
 
       PointCloudPtr transformed_cloud_surf_ptr(new PointCloud);
@@ -1709,10 +1711,13 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       Eigen::Quaterniond rot_li(Rs_i * transform_lb.rot.inverse());
       Eigen::Vector3d pos_li = Ps_i - rot_li * transform_lb.pos;
 
+      //pivot + 1 帧位姿
       Twist<double> transform_li = Twist<double>(rot_li, pos_li);
+      //相对位姿
       Eigen::Affine3f transform_i_pivot = (transform_li.inverse() * transform_pivot).cast<float>().transform();
       pcl::ExtractIndices<PointT> extract;
 
+      //pivot系点云转换到pivot+1帧坐标系下
       pcl::transformPointCloud(*(surf_stack_[pivot_idx]), *transformed_cloud_surf_ptr, transform_i_pivot);
       pcl::PointIndices::Ptr inliers_surf(new pcl::PointIndices());
 
@@ -1728,8 +1733,10 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
         std::cout << "surf_stack_[j]->size():" << surf_stack_[j]->size() << std::endl;
       }
 
+      //把pivot+1帧点云加上
       filtered_surf_points += *(surf_stack_[i]);
 
+      //存到pivot+1帧下
       *(surf_stack_[i]) = filtered_surf_points;
 #ifdef USE_CORNER
       pcl::transformPointCloud(*(corner_stack_[pivot_idx]), *transformed_cloud_corner_ptr, transform_i_pivot);
@@ -1750,7 +1757,6 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
     }
   }
 
-  //todo 这里滑窗有问题 没有滑动
   dt_buf_.push(vector<double>());
   linear_acceleration_buf_.push(vector<Vector3d>());
   angular_velocity_buf_.push(vector<Vector3d>());
@@ -1762,6 +1768,10 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
   Rs_.push(Rs_[cir_buf_count_]);
   Bas_.push(Bas_[cir_buf_count_]);
   Bgs_.push(Bgs_[cir_buf_count_]);
+
+  //todo这里点云滑窗没有滑动 要改好
+surf_stack_.push(surf_stack_[cir_buf_count_]);
+corner_stack_.push(corner_stack_[cir_buf_count_]);
 
 //  pre_integrations_.push(std::make_shared<IntegrationBase>(IntegrationBase(acc_last_, gyr_last_,
 //                                                                           Bas_[cir_buf_count_],
@@ -2909,6 +2919,7 @@ void Process() {
   point_on_z_axis_.z = 10.0;
   PointAssociateToMap(point_on_z_axis_, point_on_z_axis_, transform_tobe_mapped_);
 
+  //当前lidar位姿作为地图中心 计算cube索引
   // NOTE: in which cube
   int center_cube_i = int((transform_tobe_mapped_.pos.x() + 25.0) / 50.0) + laser_cloud_cen_length_;
   int center_cube_j = int((transform_tobe_mapped_.pos.y() + 25.0) / 50.0) + laser_cloud_cen_width_;
@@ -3026,6 +3037,7 @@ void Process() {
 
   // NOTE: above slide cubes
 
+//把有效的cube对应的索引存进来
 //存lidar视野内的点云
   laser_cloud_valid_idx_.clear();
 //存局部地图全部点云
@@ -3051,6 +3063,7 @@ void Process() {
           transform_pos.y = transform_tobe_mapped_.pos.y();
           transform_pos.z = transform_tobe_mapped_.pos.z();
 
+          //todo 检查点是否在LIDAR视野内的逻辑没有检验过
           bool is_in_laser_fov = false;
           for (int ii = -1; ii <= 1; ii += 2) {
             for (int jj = -1; jj <= 1; jj += 2) {
@@ -3092,11 +3105,14 @@ void Process() {
     }
   }
 
+  //局部地图点云
   // prepare valid map corner and surface cloud for pose optimization
   laser_cloud_corner_from_map_->clear();
   laser_cloud_surf_from_map_->clear();
   size_t laser_cloud_valid_size = laser_cloud_valid_idx_.size();
   for (int i = 0; i < laser_cloud_valid_size; ++i) {
+    //array的点云都是在UpdateMapDatabase函数中存的
+    //todo 检查到这里
     *laser_cloud_corner_from_map_ += *laser_cloud_corner_array_[laser_cloud_valid_idx_[i]];
     *laser_cloud_surf_from_map_ += *laser_cloud_surf_array_[laser_cloud_valid_idx_[i]];
   }
@@ -3162,6 +3178,7 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
 {
     //1. process lidar_info
 //    TicToc t_lidarinfohandler;
+    //把点云和位姿取出来
   	LidarInfoHandler(lidar_info);
         //平均0.5s以内
 //	double t_lidarinfo = t_lidarinfohandler.toc();
