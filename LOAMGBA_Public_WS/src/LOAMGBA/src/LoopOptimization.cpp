@@ -258,33 +258,33 @@ EstimatorConfig estimator_config_;
 
 //所有的buffer
 //todo CircularBuffer有问题 一个一个改
-std::vector<leio::PairTimeLaserTransform> all_laser_transforms_(estimator_config_.window_size + 1);
+CircularBuffer<leio::PairTimeLaserTransform> all_laser_transforms_(estimator_config_.window_size + 1);
 //下面的buffer存的是IMU系位姿
-std::vector<Vector3d> Ps_(estimator_config_.window_size + 1);
-std::vector<Matrix3d> Rs_(estimator_config_.window_size + 1);
-std::vector<Vector3d> Vs_(estimator_config_.window_size + 1);
-std::vector<Vector3d> Bas_(estimator_config_.window_size + 1);
-std::vector<Vector3d> Bgs_(estimator_config_.window_size + 1);
-std::vector<size_t> size_surf_stack_(estimator_config_.window_size + 1);
-std::vector<size_t> size_corner_stack_(estimator_config_.window_size + 1);
+CircularBuffer<Vector3d> Ps_(estimator_config_.window_size + 1);
+CircularBuffer<Matrix3d> Rs_(estimator_config_.window_size + 1);
+CircularBuffer<Vector3d> Vs_(estimator_config_.window_size + 1);
+CircularBuffer<Vector3d> Bas_(estimator_config_.window_size + 1);
+CircularBuffer<Vector3d> Bgs_(estimator_config_.window_size + 1);
+CircularBuffer<size_t> size_surf_stack_(estimator_config_.window_size + 1);
+CircularBuffer<size_t> size_corner_stack_(estimator_config_.window_size + 1);
 //endregion
-std::vector<std_msgs::Header> Headers_(estimator_config_.window_size + 1);
-std::vector<vector<double> > dt_buf_(estimator_config_.window_size + 1);
-std::vector<vector<Vector3d> > linear_acceleration_buf_(estimator_config_.window_size + 1);
-std::vector<vector<Vector3d> > angular_velocity_buf_(estimator_config_.window_size + 1);
-std::vector<shared_ptr<leio::IntegrationBase> > pre_integrations_(estimator_config_.window_size + 1);
-std::vector<PointCloudPtr> surf_stack_(estimator_config_.window_size + 1);
-std::vector<PointCloudPtr> corner_stack_(estimator_config_.window_size + 1);
-std::vector<PointCloudPtr> full_stack_(estimator_config_.window_size + 1);
+CircularBuffer<std_msgs::Header> Headers_(estimator_config_.window_size + 1);
+CircularBuffer<vector<double> > dt_buf_(estimator_config_.window_size + 1);
+CircularBuffer<vector<Vector3d> > linear_acceleration_buf_(estimator_config_.window_size + 1);
+CircularBuffer<vector<Vector3d> > angular_velocity_buf_(estimator_config_.window_size + 1);
+CircularBuffer<shared_ptr<leio::IntegrationBase> > pre_integrations_(estimator_config_.window_size + 1);
+CircularBuffer<PointCloudPtr> surf_stack_(estimator_config_.window_size + 1);
+CircularBuffer<PointCloudPtr> corner_stack_(estimator_config_.window_size + 1);
+CircularBuffer<PointCloudPtr> full_stack_(estimator_config_.window_size + 1);
 ///> optimization buffers (ProcessLaserOdom中LIO滑窗优化用到的)
-std::vector<bool> opt_point_coeff_mask_(estimator_config_.opt_window_size + 1);
-std::vector<ScorePointCoeffMap> opt_point_coeff_map_(estimator_config_.opt_window_size + 1);
-std::vector<CubeCenter> opt_cube_centers_(estimator_config_.opt_window_size + 1);
-std::vector<Transform> opt_transforms_(estimator_config_.opt_window_size + 1);
-std::vector<vector<size_t> > opt_valid_idx_(estimator_config_.opt_window_size + 1);
-std::vector<PointCloudPtr> opt_corner_stack_(estimator_config_.opt_window_size + 1);
-std::vector<PointCloudPtr> opt_surf_stack_(estimator_config_.opt_window_size + 1);
-std::vector<Eigen::Matrix<double, 6, 6>> opt_matP_(estimator_config_.opt_window_size + 1);
+CircularBuffer<bool> opt_point_coeff_mask_(estimator_config_.opt_window_size + 1);
+CircularBuffer<ScorePointCoeffMap> opt_point_coeff_map_(estimator_config_.opt_window_size + 1);
+CircularBuffer<CubeCenter> opt_cube_centers_(estimator_config_.opt_window_size + 1);
+CircularBuffer<Transform> opt_transforms_(estimator_config_.opt_window_size + 1);
+CircularBuffer<vector<size_t> > opt_valid_idx_(estimator_config_.opt_window_size + 1);
+CircularBuffer<PointCloudPtr> opt_corner_stack_(estimator_config_.opt_window_size + 1);
+CircularBuffer<PointCloudPtr> opt_surf_stack_(estimator_config_.opt_window_size + 1);
+CircularBuffer<Eigen::Matrix<double, 6, 6>> opt_matP_(estimator_config_.opt_window_size + 1);
 ///< optimization buffers
 //todo 需要追踪一下cir_buf_count_
 size_t cir_buf_count_ = 0;
@@ -296,7 +296,7 @@ struct StampedTransform {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 //用于点云去畸变
-std::vector<StampedTransform> imu_stampedtransforms(100);
+CircularBuffer<StampedTransform> imu_stampedtransforms(100);
 Transform transform_tobe_mapped_bef_;
 Transform transform_es_;
 //double赋值给float需要cast
@@ -362,16 +362,16 @@ void processIMU(double dt,
         gyr_last_ = angular_velocity;
         //for lio
         dt_buf_.push(vector<double>());
-    	linear_acceleration_buf_.push(vector<Vector3d>());
-    	angular_velocity_buf_.push(vector<Vector3d>());
+    	  linear_acceleration_buf_.push(vector<Vector3d>());
+    	  angular_velocity_buf_.push(vector<Vector3d>());
 
         Eigen::Matrix3d I3x3;
-    	I3x3.setIdentity();
-    	Ps_.push(Vector3d{0, 0, 0});
-    	Rs_.push(I3x3);
-    	Vs_.push(Vector3d{0, 0, 0});
-    	Bgs_.push(Vector3d{0, 0, 0});
-    	Bas_.push(Vector3d{0, 0, 0});
+    	  I3x3.setIdentity();
+    	  Ps_.push(Vector3d{0, 0, 0});
+    	  Rs_.push(I3x3);
+    	  Vs_.push(Vector3d{0, 0, 0});
+    	  Bgs_.push(Vector3d{0, 0, 0});
+    	  Bas_.push(Vector3d{0, 0, 0});
     }
 
     // NOTE: Do not update tmp_pre_integration_ until first laser comes
