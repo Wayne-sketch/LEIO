@@ -246,7 +246,7 @@ struct EstimatorConfig {
   bool marginalization_factor = true; //边缘掉得到的先验因子
   bool pcl_viewer = false; //not used
 
-  //todo 这里可能要改 不需要去畸变
+  //不需要去畸变
   bool enable_deskew = true; ///< if disable, deskew from PointOdometry will be used
   bool cutoff_deskew = true;
   bool keep_features = false;
@@ -1727,16 +1727,22 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
       extract.setIndices(inliers_surf);
       extract.setNegative(true);
       extract.filter(filtered_surf_points);
-
-      for(int j = 0; j < surf_stack_.size(); ++j) {
-        std::cout << "surf_stack_[j]->size():" << surf_stack_[j]->size() << std::endl;
-      }
+//	  std::cout << "filtered_surf_points: " << filtered_surf_points.size() << std::endl;
+//      std::cout << "estimator_config_.window_size:" <<  estimator_config_.window_size << std::endl;
+//      std::cout << "estimator_config_.opt_window_size:" << estimator_config_.opt_window_size << std::endl;
+//      std::cout << "cir_buf_count_:" << cir_buf_count_ << std::endl;
+//      for(int j = 0; j < surf_stack_.size(); ++j) {
+//        std::cout << "before surf_stack_[j]->size():" << surf_stack_[j]->size() << std::endl;
+//      }
 
       //把pivot+1帧点云加上
       filtered_surf_points += *(surf_stack_[i]);
 
       //存到pivot+1帧下
       *(surf_stack_[i]) = filtered_surf_points;
+//      for(int j = 0; j < surf_stack_.size(); ++j) {
+//        std::cout << "after surf_stack_[j]->size():" << surf_stack_[j]->size() << std::endl;
+//      }
 #ifdef USE_CORNER
       pcl::transformPointCloud(*(corner_stack_[pivot_idx]), *transformed_cloud_corner_ptr, transform_i_pivot);
       pcl::PointIndices::Ptr inliers_corner(new pcl::PointIndices());
@@ -1766,7 +1772,7 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
   Rs_.push(Rs_[cir_buf_count_]);
   Bas_.push(Bas_[cir_buf_count_]);
   Bgs_.push(Bgs_[cir_buf_count_]);
-  //todo 目前有个问题 滑窗的点云pivot+1帧会不停累计
+
 //  pre_integrations_.push(std::make_shared<IntegrationBase>(IntegrationBase(acc_last_, gyr_last_,
 //                                                                           Bas_[cir_buf_count_],
 //                                                                           Bgs_[cir_buf_count_],
@@ -2165,10 +2171,27 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
       }
       case INITED: { //非线性优化阶段
         if (opt_point_coeff_map_.size() == estimator_config_.opt_window_size + 1) {
-          //这里去掉了imu信息 点云去畸变
+          //todo 该不该加 这里去掉了imu信息 点云去畸变
+          if (estimator_config_.enable_deskew || estimator_config_.cutoff_deskew) {
+            laser_cloud_surf_stack_downsampled_->clear();
+            down_size_filter_surf_.setInputCloud(laser_cloud_surf_last_);
+            down_size_filter_surf_.filter(*laser_cloud_surf_stack_downsampled_);
+            size_t laser_cloud_surf_stack_ds_size = laser_cloud_surf_stack_downsampled_->points.size();
+
+            // down sample feature stack clouds
+            laser_cloud_corner_stack_downsampled_->clear();
+            down_size_filter_corner_.setInputCloud(laser_cloud_corner_last_);
+            down_size_filter_corner_.filter(*laser_cloud_corner_stack_downsampled_);
+            size_t laser_cloud_corner_stack_ds_size = laser_cloud_corner_stack_downsampled_->points.size();
+
+            surf_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_surf_stack_downsampled_));
+            size_surf_stack_.push(laser_cloud_surf_stack_downsampled_->size());
+
+            corner_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_corner_stack_downsampled_));
+            size_corner_stack_.push(laser_cloud_corner_stack_downsampled_->size());
+          }
+
           DLOG(INFO) << ">>>>>>> solving optimization <<<<<<<";
-
-
           SolveOptimization();
 
           if (!opt_point_coeff_mask_.first()) {
