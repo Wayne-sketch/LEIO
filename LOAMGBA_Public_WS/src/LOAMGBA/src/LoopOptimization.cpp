@@ -258,7 +258,6 @@ EstimatorStageFlag stage_flag_ = NOT_INITED;
 EstimatorConfig estimator_config_;
 
 //所有的buffer
-//todo CircularBuffer有问题 一个一个改
 CircularBuffer<leio::PairTimeLaserTransform> all_laser_transforms_(estimator_config_.window_size + 1);
 //下面的buffer存的是IMU系位姿
 CircularBuffer<Vector3d> Ps_(estimator_config_.window_size + 1);
@@ -1761,26 +1760,19 @@ void SlideWindow() { // NOTE: this function is only for the states and the local
   linear_acceleration_buf_.push(vector<Vector3d>());
   angular_velocity_buf_.push(vector<Vector3d>());
 
-//  Headers_.push(Headers_[cir_buf_count_]);
-  //todo 原版为什么这样写？
+  //下一帧给上一帧的值作为初值 processIMU会在这个基础上用IMU积分
   Ps_.push(Ps_[cir_buf_count_]);
   Vs_.push(Vs_[cir_buf_count_]);
   Rs_.push(Rs_[cir_buf_count_]);
   Bas_.push(Bas_[cir_buf_count_]);
   Bgs_.push(Bgs_[cir_buf_count_]);
-
-  //todo这里点云滑窗没有滑动 要改好
-surf_stack_.push(surf_stack_[cir_buf_count_]);
-corner_stack_.push(corner_stack_[cir_buf_count_]);
-
+  //todo 目前有个问题 滑窗的点云pivot+1帧会不停累计
 //  pre_integrations_.push(std::make_shared<IntegrationBase>(IntegrationBase(acc_last_, gyr_last_,
 //                                                                           Bas_[cir_buf_count_],
 //                                                                           Bgs_[cir_buf_count_],
 //                                                                           estimator_config_.pim_config)));
 
 //  all_laser_transforms_.push(all_laser_transforms_[cir_buf_count_]);
-
-// TODO: slide new lidar points
 }
 
 bool RunInitialization() {
@@ -1897,6 +1889,7 @@ void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
   size_t margin_surf_stack_ds_size = margin_surf_stack_downsampled->points.size();
   size_t margin_valid_size = margin_valid_idx.size();
 
+  //把点云放到array中去，即地图点云
   for (int i = 0; i < margin_corner_stack_ds_size; ++i) {
     //转到世界系
     PointAssociateToMap(margin_corner_stack_downsampled->points[i], point_sel, margin_transform_tobe_mapped);
@@ -1913,7 +1906,6 @@ void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
         cube_j >= 0 && cube_j < laser_cloud_width_ &&
         cube_k >= 0 && cube_k < laser_cloud_height_) {
       size_t cube_idx = ToIndex(cube_i, cube_j, cube_k);
-      //todo 需要确认一下一开始存入的逻辑是否正确
       laser_cloud_corner_array_[cube_idx]->push_back(point_sel);
     }
   }
@@ -1976,7 +1968,7 @@ void UpdateMapDatabase(PointCloudPtr margin_corner_stack_downsampled,
       laser_cloud_surf_downsampled_array_[index]->clear();
       down_size_filter_surf_.setInputCloud(laser_cloud_surf_array_[index]);
       down_size_filter_surf_.filter(*laser_cloud_surf_downsampled_array_[index]);
-
+      //放过点云以后把有效的cube降采样一次
       // swap cube clouds for next processing
       laser_cloud_corner_array_[index].swap(laser_cloud_corner_downsampled_array_[index]);
       laser_cloud_surf_array_[index].swap(laser_cloud_surf_downsampled_array_[index]);
@@ -1998,9 +1990,6 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   }
 
   Headers_.push(header);
-
-  // TODO: LaserFrame Object
-  // LaserFrame laser_frame(laser, header.stamp.toSec());
 
   leio::LaserTransform laser_transform(header.stamp.toSec(), transform_in);
 
@@ -2025,7 +2014,7 @@ void ProcessLaserOdom(const Transform &transform_in, const std_msgs::Header &hea
   opt_transforms_.push(laser_transform.transform);
   opt_valid_idx_.push(laser_cloud_valid_idx_);
 
-  //这里往滑窗里放点云
+  //这里往滑窗里放降采样后的点云
   if (stage_flag_ != INITED || (!estimator_config_.enable_deskew && !estimator_config_.cutoff_deskew)) {
     surf_stack_.push(boost::make_shared<PointCloud>(*laser_cloud_surf_stack_downsampled_));
     size_surf_stack_.push(laser_cloud_surf_stack_downsampled_->size());
@@ -3112,7 +3101,6 @@ void Process() {
   size_t laser_cloud_valid_size = laser_cloud_valid_idx_.size();
   for (int i = 0; i < laser_cloud_valid_size; ++i) {
     //array的点云都是在UpdateMapDatabase函数中存的
-    //todo 检查到这里
     *laser_cloud_corner_from_map_ += *laser_cloud_corner_array_[laser_cloud_valid_idx_[i]];
     *laser_cloud_surf_from_map_ += *laser_cloud_surf_array_[laser_cloud_valid_idx_[i]];
   }
@@ -3191,7 +3179,7 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
         	                 Ps_.last().cast<float>());
 
     	Transform d_trans = trans_prev.inverse() * trans_curr;
-		//transform_sum_ LidarInfoHandler取出来的
+		//transform_sum_ LidarInfoHandler取出来的 这个没用上
     	Transform transform_incre(transform_bef_mapped_.inverse() * transform_sum_.transform());
 
     	if (estimator_config_.imu_factor) {
@@ -3224,6 +3212,7 @@ void processLidarInfo(const LidarInfo &lidar_info, const std_msgs::Header &heade
   	Transform transform_to_init_ = transform_aft_mapped_;
 //        TicToc t_processLaserOdom;
         //这里时间太久
+        //todo transform_to_init_ transform_aft_mapped_只有process()中有改动 只有未初始化时会运行
   	ProcessLaserOdom(transform_to_init_, header);
 
 //		double t_laserodom = t_processLaserOdom.toc();
