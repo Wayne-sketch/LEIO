@@ -28,6 +28,9 @@
 
  */
 using namespace std;
+
+double laser_count = 0;
+double sum_BALM = 0;
 double voxel_size[2] = {1.0, 1.0};// 单位m
 bool viewVoxel;
 pcl::PointCloud<PointType> global;
@@ -36,6 +39,7 @@ bool useEdge;
 mutex mBuf;
 queue<sensor_msgs::PointCloud2ConstPtr> ground_buf, corn_buf, offground_buf;
 queue<nav_msgs::Odometry::ConstPtr> odom_buf;
+nav_msgs::Path laserTransformSumPath;
 
 void ground_handler(const sensor_msgs::PointCloud2ConstPtr &msg)
 {
@@ -67,6 +71,7 @@ void offground_handler(const sensor_msgs::PointCloud2ConstPtr &msg)
 }
 
 // feat_map是需要更新的全局变量
+//todo 这个地图需要维护,限制占用内存大小以满足长期的使用
 void cut_voxel(unordered_map<VOXEL_LOC, OCTO_TREE*> &feat_map, pcl::PointCloud<PointType>::Ptr pl_feat, Eigen::Matrix3d R_p, Eigen::Vector3d t_p, int feattype, int fnum, int capacity)
 {
     uint plsize = pl_feat->size();
@@ -188,16 +193,18 @@ int main(int argc, char **argv)
     ros::Publisher pub_corn = n.advertise<sensor_msgs::PointCloud2>("/map_corn", 10);
     ros::Publisher pub_ground = n.advertise<sensor_msgs::PointCloud2>("/map_ground", 10);
     ros::Publisher pub_full = n.advertise<sensor_msgs::PointCloud2>("/map_full", 10);
-    ros::Publisher pub_test = n.advertise<sensor_msgs::PointCloud2>("/map_test", 10);
+//    ros::Publisher pub_test = n.advertise<sensor_msgs::PointCloud2>("/map_test", 10);
     ros::Publisher pub_odom = n.advertise<nav_msgs::Odometry>("/odom_rviz_last", 100);
     ros::Publisher pub_pose = n.advertise<geometry_msgs::PoseArray>("/poseArrayTopic", 10);
-    ros::Publisher pubOdomAftPGO = n.advertise<nav_msgs::Odometry>("/newest_odom", 100);
-    ros::Publisher pub_cute = n.advertise<sensor_msgs::PointCloud2>("/map_cute", 100);
+    ros::Publisher pubBALMpath = n.advertise<nav_msgs::Path>("/balm_path", 100);
+//    ros::Publisher pubOdomAftPGO = n.advertise<nav_msgs::Odometry>("/newest_odom", 100);
+//    ros::Publisher pub_cute = n.advertise<sensor_msgs::PointCloud2>("/map_cute", 100);
     n.param<bool>("viewVoxel", viewVoxel, false);
 
 
     // -------------------------- for loop --------------------
     ros::Publisher pubOdomAftMapped = n.advertise<nav_msgs::Odometry>("/BALM_mapped_to_init", 100);
+    ros::Publisher pubSurf = n.advertise<sensor_msgs::PointCloud2>("/surf_BA", 100);
     ros::Publisher puboffgrounds = n.advertise<sensor_msgs::PointCloud2>("/offground_BA", 100);
     ros::Publisher pubground = n.advertise<sensor_msgs::PointCloud2>("/ground_BA", 100);
     ros::Publisher pubEdge = n.advertise<sensor_msgs::PointCloud2>("/Edge_BA", 100);
@@ -205,8 +212,8 @@ int main(int argc, char **argv)
     double ground_filter_length = 0.4;
     double corn_filter_length = 0.2;
 
-    int window_size = 20;// sliding window size
-    int margi_size = 5;// margilization size
+    int window_size = 10;// sliding window size
+    int margi_size = 2;// margilization size
     int filter_num = 1;// for map-refine LM optimizer
     int thread_num = 2;// for map-refine LM optimizer
     int skip_num = 0;
@@ -233,6 +240,7 @@ int main(int argc, char **argv)
     pcl::PointCloud<PointType>::Ptr pl_corn(new pcl::PointCloud<PointType>);
     pcl::PointCloud<PointType>::Ptr pl_ground(new pcl::PointCloud<PointType>);
     pcl::PointCloud<PointType>::Ptr pl_offground(new pcl::PointCloud<PointType>);
+	pcl::PointCloud<PointType>::Ptr pl_plane(new pcl::PointCloud<PointType>);
 
     //todo 记录时间戳
     vector<uint64_t> pl_time_buf;
@@ -253,6 +261,8 @@ int main(int argc, char **argv)
 
     while(n.ok())
     {
+        // 记录BALM开始时间
+        auto start_BALM = std::chrono::high_resolution_clock::now();
         ros::spinOnce();
         if(corn_buf.empty() || ground_buf.empty()  || odom_buf.empty() || offground_buf.empty())
         {
@@ -295,6 +305,7 @@ int main(int argc, char **argv)
 
         //pcl::io::savePCDFileBinary("/home/wb/FALOAMBA_WS/wb/Map/map.pcd", *pl_ground);
 
+        *pl_plane = *pl_ground + *pl_offground;
         *pl_ground_temp = *pl_ground;
         *pl_edge_temp = *pl_corn;
         *pl_offground_temp = *pl_offground;
@@ -390,6 +401,8 @@ int main(int argc, char **argv)
         t_gather_pose.setZero();
 
         down_sampling_voxel(*pl_ground, ground_filter_length);
+        down_sampling_voxel(*pl_plane, ground_filter_length);
+        down_sampling_voxel(*pl_offground, ground_filter_length);
         if(useEdge)
         {
             down_sampling_voxel(*pl_corn, corn_filter_length);
@@ -399,7 +412,7 @@ int main(int argc, char **argv)
         // Put current feature points into root voxel node 创建根节点(论文中的方形节点)
         // ground_map和window_size是全局变量
         // 地图由哈希表和八叉树构成，哈希表管理最上层的地图结构，八叉树每个节点中存放一个平面，如果一个节点中的点不能被表示为一个特征，拆分(recut)这个节点
-        cut_voxel(ground_map, pl_ground, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
+        cut_voxel(ground_map, pl_plane, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
         //后续地图的点被送到对应的节点中，在面特征稳定后删除旧的观测，只保留最新观测，如果新的观测和旧的观测冲突，删去旧估计重写估计位姿。
 
         if(useEdge)
@@ -515,11 +528,10 @@ int main(int argc, char **argv)
                 // cout << "opt_lsv.t_poses = " << opt_lsv.t_poses[i] << endl;
                 Eigen::Quaterniond q_w_curr(opt_lsv.so3_poses[i].matrix());
                 nav_msgs::Odometry odomAftMapped;
-                //todo 这里有问题 时间戳赋值有问题
                 odomAftMapped.header.frame_id = "camera_init";
 //                ros::Time time = ros::Time::now();
 //                odomAftMapped.header.stamp = time;
-                //todo 时间戳赋值对应到原本的位姿上 可能因为发布逻辑导致时间戳混乱
+                //时间戳赋值对应到原本的位姿上 可能因为发布逻辑导致时间戳混乱
                 ros::Time time = ros::Time().fromNSec(pl_time_buf[window_base + i]);
                 odomAftMapped.header.stamp = time;
                 odomAftMapped.pose.pose.orientation.x = q_w_curr.x();
@@ -529,11 +541,47 @@ int main(int argc, char **argv)
                 odomAftMapped.pose.pose.position.x = opt_lsv.t_poses[i].x();
                 odomAftMapped.pose.pose.position.y = opt_lsv.t_poses[i].y();
                 odomAftMapped.pose.pose.position.z = opt_lsv.t_poses[i].z();
+                //存BALM优化位姿结果
+//                std::ofstream pose("/media/ctx/0BE20E8D0BE20E8D/kitti_result/PLO/0033_09/plo_0033.txt", std::ios::app);
+//				pose.setf(std::ios::scientific, std::ios::floatfield);
+//                pose.precision(9);
+//                static double timeStart = odomAftMapped.header.stamp.toSec();
+//                auto T1 = ros::Time().fromSec(timeStart);
+//                pose<< odomAftMapped.header.stamp - T1 << " "
+//                     << odomAftMapped.pose.pose.position.x << " "
+//					 << odomAftMapped.pose.pose.position.y << " "
+//                	 << odomAftMapped.pose.pose.position.z << " "
+//                	 << odomAftMapped.pose.pose.orientation.x << " "
+//                	 << odomAftMapped.pose.pose.orientation.y << " "
+//                	 << odomAftMapped.pose.pose.orientation.z << " "
+//                	 << odomAftMapped.pose.pose.orientation.w << std::endl;
+//                pose.close();
 
                 //发送给lio模块用的点云 时间戳要修改
                 // ---------------------- 发布优化后的位姿给Rviz 和 loop模块 ------------------------------
                 pubOdomAftMapped.publish(odomAftMapped);
+  {
+    //发布轨迹
+    geometry_msgs::PoseStamped laserTransformSumPose;
+    laserTransformSumPose.header = odomAftMapped.header;
+    laserTransformSumPose.pose = odomAftMapped.pose.pose;
+    laserTransformSumPath.header.stamp = odomAftMapped.header.stamp;
+    laserTransformSumPath.header.frame_id = "camera_init";
+    laserTransformSumPath.poses.push_back(laserTransformSumPose);
+    pubBALMpath.publish(laserTransformSumPath);
+  }
                 // ----------------------------------- for loop ----------------------------------------
+                // 合并 ground 和 offground 点云
+				pcl::PointCloud<PointType>::Ptr combined_cloud(new pcl::PointCloud<PointType>());
+				*combined_cloud += *pl_ground_buf[window_base + i];
+				*combined_cloud += *pl_offground_buf[window_base + i];
+				// 将合并后的点云转换为 ROS 消息
+				sensor_msgs::PointCloud2 surf_msg;
+				pcl::toROSMsg(*combined_cloud, surf_msg);
+				surf_msg.header.stamp = time;
+				surf_msg.header.frame_id = "camera_init";
+                pubSurf.publish(surf_msg);
+
                 sensor_msgs::PointCloud2 ground_msg;
                 pcl::toROSMsg(  *pl_ground_buf[window_base + i], ground_msg);
                 ground_msg.header.stamp = time;
@@ -554,7 +602,6 @@ int main(int argc, char **argv)
                 offground_msg.header.frame_id = "camera_init";
                 puboffgrounds.publish(offground_msg);
                 pl_offground_buf[window_base + i]->clear();
-
             }
 
             //global += pl_send;
@@ -634,6 +681,16 @@ int main(int argc, char **argv)
             window_base += margi_size;
             opt_lsv.free_voxel();
         }
+
+        // 记录BALM结束时间
+        auto end_BALM = std::chrono::high_resolution_clock::now();
+        // 计算耗时并存储
+        std::chrono::duration<double, std::milli> elapsed_BALM = end_BALM - start_BALM;
+        // 计算平均时间
+        sum_BALM += elapsed_BALM.count();
+        laser_count++;
+        double averageTime_BALM = sum_BALM / laser_count;
+        std::cout << "BALM 平均用时" << averageTime_BALM << " ms" << std::endl;
 
     }
 }

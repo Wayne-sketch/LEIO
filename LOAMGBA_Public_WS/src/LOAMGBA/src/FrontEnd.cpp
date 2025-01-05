@@ -38,6 +38,10 @@ using namespace std;
 using namespace cv;
 using namespace std::chrono;
 
+double sum_feature = 0;
+double sum_scantoscan = 0;
+double laser_count = 0;
+
 int nScans = 0;
 float scanPeriod = 0.1;
 double minimumRange = 0.3;
@@ -1598,10 +1602,10 @@ void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     }
 
     //下一步处理
-    clock_t start, end;
-    double time;
-    start = clock();
-    static bool init = false;
+//    clock_t start, end;
+//    double time;
+//    start = clock();
+//    static bool init = false;
 
     ros::Time timestamp = laserCloudMsg->header.stamp;
     // 边缘点
@@ -1633,8 +1637,8 @@ void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         // cout << keyPoints_last.size() << endl;
         // 5. ICP
         Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
-        end = clock();
-        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        end = clock();
+//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
 //        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
@@ -1646,8 +1650,8 @@ void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         LK_Tracking(keyPoints_curr, _3DMatch1 , _3DMatch2);
         // -----------------------  Registration ---------------------
         ICP_Registration(keyPoints_curr, _3DMatch1, _3DMatch2, timestamp);
-        end = clock();
-        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        end = clock();
+//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
 //        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
@@ -1714,10 +1718,11 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 //    } else {
 //        std::cout << "Invalid PointCloud2." << std::endl;
 //    }
-
-    clock_t start, end;
-    double time;
-    start = clock();
+//统计提取特征点平均时间 角点面点LINK3D聚合点 记录开始时间
+auto start = std::chrono::high_resolution_clock::now();
+//    clock_t start, end;
+//    double time;
+//    start = clock();
     static bool init = false;
 
     ros::Time timestamp = laserCloudMsg->header.stamp;
@@ -1743,9 +1748,19 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     // 3. 创建描述子
     getDescriptors(keyPoints_curr, descriptors_curr);
 //    std::cout << "mark5" << std::endl;
+// 记录结束时间
+auto end = std::chrono::high_resolution_clock::now();
+// 计算耗时并存储
+std::chrono::duration<double, std::milli> elapsed = end - start;
+// 计算平均时间
+sum_feature += elapsed.count();
+laser_count++;
+double averageTime = sum_feature / laser_count;
+std::cout << "提取角点 面点 LIN3D聚合点并计算描述子平均用时: " << averageTime << " ms" << std::endl;
 
     if(1)//!keyPoints_last.empty()
     {
+auto start_scantoscan = std::chrono::high_resolution_clock::now();
         vector<pair<int, int>> vMatchedIndex;
         // 4. 描述子匹配
         match(keyPoints_curr, keyPoints_last,descriptors_curr, descriptors_last, vMatchedIndex);
@@ -1754,9 +1769,17 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         // cout << keyPoints_last.size() << endl;
         // 5. ICP
         Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
+// 记录结束时间
+auto end_scantoscan = std::chrono::high_resolution_clock::now();
+// 计算耗时并存储
+std::chrono::duration<double, std::milli> elapsed_scantoscan = end_scantoscan - start_scantoscan;
+// 计算平均时间
+sum_scantoscan += elapsed_scantoscan.count();
+double averageTime_scantoscan = sum_scantoscan / laser_count;
+std::cout << "LINK3D scan to scan 平均用时" << averageTime_scantoscan << " ms" << std::endl;
 //        std::cout << "mark7" << std::endl;
-        end = clock();
-        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        end = clock();
+//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
 //        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }
@@ -1768,8 +1791,8 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
         LK_Tracking(keyPoints_curr, _3DMatch1 , _3DMatch2);
         // -----------------------  Registration ---------------------
         ICP_Registration(keyPoints_curr, _3DMatch1, _3DMatch2, timestamp);
-        end = clock();
-        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        end = clock();
+//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
         // 0.05s 0.12
 //        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
     }

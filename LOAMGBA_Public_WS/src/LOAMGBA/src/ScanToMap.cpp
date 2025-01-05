@@ -73,6 +73,8 @@ using namespace std;
 
 
 int frameCount = 0;
+double laser_count = 0;
+double sum_csf = 0;
 
 double timeLaserCloudCornerLast = 0;
 double timeLaserCloudSurfLast = 0;
@@ -119,8 +121,6 @@ pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>
 
 // points in every cube
 pcl::PointCloud<PointType>::Ptr laserCloudCornerArray[laserCloudNum];
-
-
 
 //kd-tree
 pcl::KdTreeFLANN<PointType>::Ptr kdtreeCornerFromMap(new pcl::KdTreeFLANN<PointType>());
@@ -175,6 +175,9 @@ ros::Publisher pubLaserCloudSurround, pubLaserCloudMap, pubLaserCloudFullRes, pu
 ros::Publisher pubOffGround;
 ros::Publisher pubGround;
 ros::Publisher pubEdge;
+ros::Publisher pubOffGround_view;
+ros::Publisher pubGround_view;
+ros::Publisher pubEdge_view;
 
 image_transport::Publisher pubImgae;
 
@@ -792,7 +795,7 @@ void process()
             }
             //printf("filter time %f ms \n", t_filter.toc());
             TicToc t_pub;
-
+auto start_csf = std::chrono::high_resolution_clock::now();
             CSF csf;
             csf.params.iterations = 600;
             csf.params.time_step = 0.95;
@@ -809,6 +812,17 @@ void process()
             csf.do_filtering(groundIndexes, offGroundIndexes);
             pcl::copyPointCloud(*laserCloudSurfLast, groundIndexes, *groundFrame);
             pcl::copyPointCloud(*laserCloudSurfLast, offGroundIndexes, *offGroundFrame);
+
+// 记录CSF结束时间
+auto end_csf = std::chrono::high_resolution_clock::now();
+// 计算耗时并存储
+std::chrono::duration<double, std::milli> elapsed_scantoscan = end_csf - start_csf;
+// 计算平均时间
+sum_csf += elapsed_scantoscan.count();
+laser_count++;
+double averageTime_csf = sum_csf / laser_count;
+std::cout << "csf 平均用时" << averageTime_csf << " ms" << std::endl;
+
 
             // ----------------------------------- for loop ----------------------------------------
             sensor_msgs::PointCloud2 offGround_msg;
@@ -830,6 +844,24 @@ void process()
             edge_msg.header.frame_id = "camera_init";
             pubEdge.publish(edge_msg);
 
+            //变到世界系下发布
+            //todo
+//            pcl::toROSMsg(*offGroundFrame, offGround_msg);
+//            offGround_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+//            offGround_msg.header.frame_id = "camera_init";
+//            pubOffGround_view.publish(offGround_msg);
+//
+//            sensor_msgs::PointCloud2 ground_msg;
+//            pcl::toROSMsg(  *groundFrame, ground_msg);
+//            ground_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+//            ground_msg.header.frame_id = "camera_init";
+//            pubGround_view.publish(ground_msg);
+//
+//            sensor_msgs::PointCloud2 edge_msg;
+//            pcl::toROSMsg(*laserCloudCornerLast, edge_msg);
+//            edge_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+//            edge_msg.header.frame_id = "camera_init";
+//            pubEdge_view.publish(edge_msg);
 
             //printf("mapping pub time %f ms \n", t_pub.toc());
             //printf("whole mapping time %f ms +++++\n", t_whole.toc());
@@ -903,6 +935,9 @@ int main(int argc, char **argv)
     pubOffGround = nh.advertise<sensor_msgs::PointCloud2>("/OffGround", 100);
     pubGround = nh.advertise<sensor_msgs::PointCloud2>("/Ground", 100);
     pubEdge = nh.advertise<sensor_msgs::PointCloud2>("/Edge", 100);
+    pubOffGround_view = nh.advertise<sensor_msgs::PointCloud2>("/OffGround_view", 100);
+    pubGround_view = nh.advertise<sensor_msgs::PointCloud2>("/Ground_view", 100);
+    pubEdge_view = nh.advertise<sensor_msgs::PointCloud2>("/Edge_view", 100);
     // Mapping模块优化之后的T_{cur}^{w}，Map to Map
     pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 100);
     // Transform Integration之后的高频位姿数据，里程计坐标系位姿转化到地图坐标系，mapping输出的1Hz位姿，odometry输出的10Hz位姿，整合成10hz作为最终结果
