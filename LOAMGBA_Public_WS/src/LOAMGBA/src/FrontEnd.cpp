@@ -31,7 +31,7 @@
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
 #include "utility/rotation.h"
-#include <livox_ros_driver/CustomMsg.h>
+//#include <livox_ros_driver/CustomMsg.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 
 using namespace std;
@@ -289,6 +289,16 @@ void extractEdgePoint(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg, Sca
                     scanID = nScans / 2 + int((-8.83 - angle) * 2.0 + 0.5);
                 if (angle > 2 || angle < -24.33 || scanID > 50 || scanID < 0)
                 {
+                    count--;
+                    continue;
+                }
+            }
+            else if (nScans == 128)
+            {
+                // 计算 scanID（适用于 Ouster OS0-128-U）
+                int scanID = int((angle + 45.0) / (90.0 / 127) + 0.5);
+                // 过滤无效点
+                if (scanID < 0 || scanID >= 128) {
                     count--;
                     continue;
                 }
@@ -1541,131 +1551,131 @@ void Registration(pcl::PointCloud<pcl::PointXYZI> &keyPoints_curr, pcl::PointClo
 }
 
 //接收livox lidar点云
-void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
-{
-    // 创建 sensor_msgs::PointCloud2 消息
-    sensor_msgs::PointCloud2Ptr laserCloudMsg(new sensor_msgs::PointCloud2);
-    laserCloudMsg->header.frame_id = "base_frame"; // 设置坐标系
-    laserCloudMsg->header.stamp = msg->header.stamp; // 设置时间戳
-
-    int plsize = msg->point_num;
-    laserCloudMsg->height = 1;
-    laserCloudMsg->width = plsize;
-    laserCloudMsg->is_dense = false; // 或者根据需要设置
-    laserCloudMsg->is_bigendian = false;
-
-    // 设置字段
-    sensor_msgs::PointCloud2Modifier modifier(*laserCloudMsg);
-    modifier.setPointCloud2Fields(6,
-        "x", 1, sensor_msgs::PointField::FLOAT32,
-        "y", 1, sensor_msgs::PointField::FLOAT32,
-        "z", 1, sensor_msgs::PointField::FLOAT32,
-        "intensity", 1, sensor_msgs::PointField::FLOAT32,
-        "curvature", 1, sensor_msgs::PointField::FLOAT32,
-        "line", 1, sensor_msgs::PointField::UINT8
-    );
-
-    // 设置数据
-    sensor_msgs::PointCloud2Iterator<float> iter_x(*laserCloudMsg, "x");
-    sensor_msgs::PointCloud2Iterator<float> iter_y(*laserCloudMsg, "y");
-    sensor_msgs::PointCloud2Iterator<float> iter_z(*laserCloudMsg, "z");
-    sensor_msgs::PointCloud2Iterator<float> iter_intensity(*laserCloudMsg, "intensity");
-    sensor_msgs::PointCloud2Iterator<float> iter_curvature(*laserCloudMsg, "curvature");
-    sensor_msgs::PointCloud2Iterator<uint8_t> iter_line(*laserCloudMsg, "line");
-
-    uint valid_num = 0;
-    int N_SCANS = 6;
-    int point_filter_num = 1;
-
-    for (uint i = 0; i < plsize; i++) // 从 0 开始
-    {
-        if ((msg->points[i].line < N_SCANS) && ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00))
-        {
-            valid_num++;
-            if (valid_num % point_filter_num == 0)
-            {
-                *iter_x = msg->points[i].x;
-                *iter_y = msg->points[i].y;
-                *iter_z = msg->points[i].z;
-                *iter_intensity = msg->points[i].reflectivity;
-                *iter_curvature = msg->points[i].offset_time / float(1000000); // curvature 作为时间
-                *iter_line = msg->points[i].line;
-
-                ++iter_x;
-                ++iter_y;
-                ++iter_z;
-                ++iter_intensity;
-                ++iter_curvature;
-                ++iter_line;
-            }
-        }
-    }
-
-    //下一步处理
-//    clock_t start, end;
-//    double time;
-//    start = clock();
-//    static bool init = false;
-
-    ros::Time timestamp = laserCloudMsg->header.stamp;
-    // 边缘点
-    ScanEdgePoints edgePoints;
-    // 1. 提取当前帧的边缘点，根据线束储存边缘点
-    extractEdgePoint(laserCloudMsg, edgePoints);
-//?有问题
-
-
-
-    pcl::PointCloud<pcl::PointXYZ> clusters_Cloud;
-    ScanEdgePoints sectorAreaCloud;
-    // 2.1 输入边缘点，输出3D扇形区域点，根据扇区储存边缘点
-    divideArea(edgePoints, sectorAreaCloud);
-    ScanEdgePoints clusters;
-    // 2.2 输入扇形区域点，输出聚合点 ，大容器：所有簇，小容器：一簇的所有点
-    getCluster(sectorAreaCloud, clusters);
-
-    // 2.3 计算所有簇的质心
-    getMeanKeyPoint(clusters, keyPoints_curr);
-    // 3. 创建描述子
-    getDescriptors(keyPoints_curr, descriptors_curr);
-    if(1)//!keyPoints_last.empty()
-    {
-        vector<pair<int, int>> vMatchedIndex;
-        // 4. 描述子匹配
-        match(keyPoints_curr, keyPoints_last,descriptors_curr, descriptors_last, vMatchedIndex);
-        // cout << vMatchedIndex.data()->first << " " << vMatchedIndex.data()->second << endl;
-        // cout << keyPoints_last.size() << endl;
-        // 5. ICP
-        Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
-//        end = clock();
-//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
-        // 0.05s 0.12
-//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
-    }
-
-    if(0)
-    {
-        std::map<int, pcl::PointXYZI> _3DMatch1, _3DMatch2;
-        // -------------------------  Tracking -----------------------
-        LK_Tracking(keyPoints_curr, _3DMatch1 , _3DMatch2);
-        // -----------------------  Registration ---------------------
-        ICP_Registration(keyPoints_curr, _3DMatch1, _3DMatch2, timestamp);
-//        end = clock();
-//        time = ((double) (end - start)) / CLOCKS_PER_SEC;
-        // 0.05s 0.12
-//        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
-    }
-
-    keyPoints_last = keyPoints_curr;
-    descriptors_last = descriptors_curr;
-
-    _curr_images.clear();
-    laserCloud.clear();
-    cornerPointsLessSharp.clear();
-    surfPointsLessFlat.clear();
-
-    keyPoints_curr.clear();
-}
+//void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
+//{
+//    // 创建 sensor_msgs::PointCloud2 消息
+//    sensor_msgs::PointCloud2Ptr laserCloudMsg(new sensor_msgs::PointCloud2);
+//    laserCloudMsg->header.frame_id = "base_frame"; // 设置坐标系
+//    laserCloudMsg->header.stamp = msg->header.stamp; // 设置时间戳
+//
+//    int plsize = msg->point_num;
+//    laserCloudMsg->height = 1;
+//    laserCloudMsg->width = plsize;
+//    laserCloudMsg->is_dense = false; // 或者根据需要设置
+//    laserCloudMsg->is_bigendian = false;
+//
+//    // 设置字段
+//    sensor_msgs::PointCloud2Modifier modifier(*laserCloudMsg);
+//    modifier.setPointCloud2Fields(6,
+//        "x", 1, sensor_msgs::PointField::FLOAT32,
+//        "y", 1, sensor_msgs::PointField::FLOAT32,
+//        "z", 1, sensor_msgs::PointField::FLOAT32,
+//        "intensity", 1, sensor_msgs::PointField::FLOAT32,
+//        "curvature", 1, sensor_msgs::PointField::FLOAT32,
+//        "line", 1, sensor_msgs::PointField::UINT8
+//    );
+//
+//    // 设置数据
+//    sensor_msgs::PointCloud2Iterator<float> iter_x(*laserCloudMsg, "x");
+//    sensor_msgs::PointCloud2Iterator<float> iter_y(*laserCloudMsg, "y");
+//    sensor_msgs::PointCloud2Iterator<float> iter_z(*laserCloudMsg, "z");
+//    sensor_msgs::PointCloud2Iterator<float> iter_intensity(*laserCloudMsg, "intensity");
+//    sensor_msgs::PointCloud2Iterator<float> iter_curvature(*laserCloudMsg, "curvature");
+//    sensor_msgs::PointCloud2Iterator<uint8_t> iter_line(*laserCloudMsg, "line");
+//
+//    uint valid_num = 0;
+//    int N_SCANS = 6;
+//    int point_filter_num = 1;
+//
+//    for (uint i = 0; i < plsize; i++) // 从 0 开始
+//    {
+//        if ((msg->points[i].line < N_SCANS) && ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00))
+//        {
+//            valid_num++;
+//            if (valid_num % point_filter_num == 0)
+//            {
+//                *iter_x = msg->points[i].x;
+//                *iter_y = msg->points[i].y;
+//                *iter_z = msg->points[i].z;
+//                *iter_intensity = msg->points[i].reflectivity;
+//                *iter_curvature = msg->points[i].offset_time / float(1000000); // curvature 作为时间
+//                *iter_line = msg->points[i].line;
+//
+//                ++iter_x;
+//                ++iter_y;
+//                ++iter_z;
+//                ++iter_intensity;
+//                ++iter_curvature;
+//                ++iter_line;
+//            }
+//        }
+//    }
+//
+//    //下一步处理
+////    clock_t start, end;
+////    double time;
+////    start = clock();
+////    static bool init = false;
+//
+//    ros::Time timestamp = laserCloudMsg->header.stamp;
+//    // 边缘点
+//    ScanEdgePoints edgePoints;
+//    // 1. 提取当前帧的边缘点，根据线束储存边缘点
+//    extractEdgePoint(laserCloudMsg, edgePoints);
+////?有问题
+//
+//
+//
+//    pcl::PointCloud<pcl::PointXYZ> clusters_Cloud;
+//    ScanEdgePoints sectorAreaCloud;
+//    // 2.1 输入边缘点，输出3D扇形区域点，根据扇区储存边缘点
+//    divideArea(edgePoints, sectorAreaCloud);
+//    ScanEdgePoints clusters;
+//    // 2.2 输入扇形区域点，输出聚合点 ，大容器：所有簇，小容器：一簇的所有点
+//    getCluster(sectorAreaCloud, clusters);
+//
+//    // 2.3 计算所有簇的质心
+//    getMeanKeyPoint(clusters, keyPoints_curr);
+//    // 3. 创建描述子
+//    getDescriptors(keyPoints_curr, descriptors_curr);
+//    if(1)//!keyPoints_last.empty()
+//    {
+//        vector<pair<int, int>> vMatchedIndex;
+//        // 4. 描述子匹配
+//        match(keyPoints_curr, keyPoints_last,descriptors_curr, descriptors_last, vMatchedIndex);
+//        // cout << vMatchedIndex.data()->first << " " << vMatchedIndex.data()->second << endl;
+//        // cout << keyPoints_last.size() << endl;
+//        // 5. ICP
+//        Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
+////        end = clock();
+////        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        // 0.05s 0.12
+////        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//    }
+//
+//    if(0)
+//    {
+//        std::map<int, pcl::PointXYZI> _3DMatch1, _3DMatch2;
+//        // -------------------------  Tracking -----------------------
+//        LK_Tracking(keyPoints_curr, _3DMatch1 , _3DMatch2);
+//        // -----------------------  Registration ---------------------
+//        ICP_Registration(keyPoints_curr, _3DMatch1, _3DMatch2, timestamp);
+////        end = clock();
+////        time = ((double) (end - start)) / CLOCKS_PER_SEC;
+//        // 0.05s 0.12
+////        cout << "Link3D前端里程计 comsumming Time: " << time << "s" << endl;
+//    }
+//
+//    keyPoints_last = keyPoints_curr;
+//    descriptors_last = descriptors_curr;
+//
+//    _curr_images.clear();
+//    laserCloud.clear();
+//    cornerPointsLessSharp.clear();
+//    surfPointsLessFlat.clear();
+//
+//    keyPoints_curr.clear();
+//}
 
 bool isValidPointCloud(const sensor_msgs::PointCloud2ConstPtr& cloud) {
     // 检查点云是否为空
@@ -1719,7 +1729,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 //        std::cout << "Invalid PointCloud2." << std::endl;
 //    }
 //统计提取特征点平均时间 角点面点LINK3D聚合点 记录开始时间
-auto start = std::chrono::high_resolution_clock::now();
+// auto start = std::chrono::high_resolution_clock::now();
 //    clock_t start, end;
 //    double time;
 //    start = clock();
@@ -1749,18 +1759,18 @@ auto start = std::chrono::high_resolution_clock::now();
     getDescriptors(keyPoints_curr, descriptors_curr);
 //    std::cout << "mark5" << std::endl;
 // 记录结束时间
-auto end = std::chrono::high_resolution_clock::now();
+// auto end = std::chrono::high_resolution_clock::now();
 // 计算耗时并存储
-std::chrono::duration<double, std::milli> elapsed = end - start;
+// std::chrono::duration<double, std::milli> elapsed = end - start;
 // 计算平均时间
-sum_feature += elapsed.count();
-laser_count++;
-double averageTime = sum_feature / laser_count;
-std::cout << "提取角点 面点 LIN3D聚合点并计算描述子平均用时: " << averageTime << " ms" << std::endl;
+// sum_feature += elapsed.count();
+// laser_count++;
+// double averageTime = sum_feature / laser_count;
+// std::cout << "提取角点 面点 LIN3D聚合点并计算描述子平均用时: " << averageTime << " ms" << std::endl;
 
     if(1)//!keyPoints_last.empty()
     {
-auto start_scantoscan = std::chrono::high_resolution_clock::now();
+// auto start_scantoscan = std::chrono::high_resolution_clock::now();
         vector<pair<int, int>> vMatchedIndex;
         // 4. 描述子匹配
         match(keyPoints_curr, keyPoints_last,descriptors_curr, descriptors_last, vMatchedIndex);
@@ -1770,13 +1780,13 @@ auto start_scantoscan = std::chrono::high_resolution_clock::now();
         // 5. ICP
         Registration(keyPoints_curr, keyPoints_last, vMatchedIndex, timestamp);
 // 记录结束时间
-auto end_scantoscan = std::chrono::high_resolution_clock::now();
+// auto end_scantoscan = std::chrono::high_resolution_clock::now();
 // 计算耗时并存储
-std::chrono::duration<double, std::milli> elapsed_scantoscan = end_scantoscan - start_scantoscan;
+// std::chrono::duration<double, std::milli> elapsed_scantoscan = end_scantoscan - start_scantoscan;
 // 计算平均时间
-sum_scantoscan += elapsed_scantoscan.count();
-double averageTime_scantoscan = sum_scantoscan / laser_count;
-std::cout << "LINK3D scan to scan 平均用时" << averageTime_scantoscan << " ms" << std::endl;
+// sum_scantoscan += elapsed_scantoscan.count();
+// double averageTime_scantoscan = sum_scantoscan / laser_count;
+// std::cout << "LINK3D scan to scan 平均用时" << averageTime_scantoscan << " ms" << std::endl;
 //        std::cout << "mark7" << std::endl;
 //        end = clock();
 //        time = ((double) (end - start)) / CLOCKS_PER_SEC;
@@ -1822,7 +1832,7 @@ int main(int argc, char** argv)
     printf("scan line number %d \n", nScans);
     printf("minimum_range %f \n", minimumRange);
 
-    if(nScans != 16 && nScans != 32 && nScans != 64 && nScans != 80)
+    if(nScans != 16 && nScans != 32 && nScans != 64 && nScans != 80 && nScans != 128)
     {
         printf("only support velodyne with 16, 32 , 64 or RS80 scan line!");
         return 0;

@@ -1,12 +1,18 @@
 <launch>
-    
+<!--     <arg name="config_path" default = "$(find faloamBA)/../config/parameters.yaml" /> -->
+
     <param name="scan_line" type="int" value="64" />
     <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
     <param name="mapping_skip_frame" type="int" value="1" />
     <!-- remove too closed points 0.3 5 -->
+<!--   For KITTI-->
     <param name="minimum_range" type="double" value="3.0"/>
-    <param name="mapping_line_resolution" type="double" value="0.4"/> <!-- A-LOAM -->
-    <param name="mapping_plane_resolution" type="double" value="0.8"/> <!-- A-LOAM -->
+    <param name="mapping_line_resolution" type="double" value="0.4"/> A-LOAM
+    <param name="mapping_plane_resolution" type="double" value="0.8"/> A-LOAM
+<!--  For ouster-os0-->
+<!--     <param name="minimum_range" type="double" value="1.0"/> -->
+<!--     <param name="mapping_line_resolution" type="double" value="0.4"/> A-LOAM -->
+<!--     <param name="mapping_plane_resolution" type="double" value="0.8"/> A-LOAM -->
 
     <!-- SC-A-LOAM 两米一个关键帧 2.0 10-->
     <param name="keyframe_meter_gap" type="double" value="2.0"/>
@@ -15,7 +21,7 @@
     <param name="useCSF" type="bool" value="true"/>
 
     <!-- BALM -->
-    <param name="useEdge" type="bool" value="false"/>
+    <param name="useEdge" type="bool" value="true"/>
     <param name="FilterGroundLeaf" type="double" value="0.1"/>
     <param name="follow" type="bool" value="true"/>
     <param name="viewMap" type="bool" value="true"/>
@@ -46,18 +52,37 @@
 
     <param name="lidar_type" type="string" value="HDL64"/> 
 <!--     <remap from="/velodyne_points" to="/livox/lidar"/> -->
-    <remap from="/velodyne_points" to="/points_raw"/>
+<!--  KITTI-->
+<!--     <remap from="/velodyne_points" to="/points_raw"/> -->
+<!--  自采数据集-->
+    <remap from="/velodyne_points" to="/ouster/points"/>
+    <remap from="/imu_raw" to="/ouster/imu"/>
+
 
 <!-- IMU参数 -->
     <param name="imuAccNoise" type="double" value="3.9939570888238808" />
     <param name="imuGyrNoise" type="double" value="1.5636343949698187" />
-    <param name="imuAccBiasN" type="double" value="6.4356659353532566e-06" />
-    <param name="imuGyrBiasN" type="double" value="3.5640318696367613e-06" />
+    <param name="imuAccBiasN" type="double" value="6.4356659353532566e-05" />
+    <param name="imuGyrBiasN" type="double" value="3.5640318696367613e-05" />
+    <!--     <param name="imuAccNoise" type="double" value="0.2" /> -->
+    <!--     <param name="imuGyrNoise" type="double" value="0.02" /> -->
+    <!--     <param name="imuAccBiasN" type="double" value="0.0002" /> -->
+    <!--     <param name="imuGyrBiasN" type="double" value="2.0e-5" /> -->
 
-<!--     <param name="imuAccNoise" type="double" value="0.2" /> -->
-<!--     <param name="imuGyrNoise" type="double" value="0.02" /> -->
-<!--     <param name="imuAccBiasN" type="double" value="0.0002" /> -->
-<!--     <param name="imuGyrBiasN" type="double" value="2.0e-5" /> -->
+<!--  IMU to Lidar外参-->
+<!--  KITTI-->
+<!--     <param name="extRPYV" type="double" value="9.999976e-01 7.553071e-04 -2.035826e-03 -7.854027e-04 9.998898e-01 -1.482298e-02 2.024406e-03 1.482454e-02 9.998881e-01"/> -->
+<!--     <param name="extTransV" type="double" value="-8.086759e-01 3.195559e-01 -7.997231e-01"/> -->
+<!--  Self made dataset ouster imu to ouster lidar-->
+<!--     <param name="extRPYV" type="double[]" value="-1, 0, 0, 0, -1, 0, 0, 0, 1"/> -->
+<!--     <param name="extTransV" type="double[]" value="-0.006253, 0.011775, -0.028535"/> -->
+
+<!--  Self made dataset event camera imu to ouster lidar-->
+<!--     <param name="extRPYV" type="double" value="9.999976e-01 7.553071e-04 -2.035826e-03 -7.854027e-04 9.998898e-01 -1.482298e-02 2.024406e-03 1.482454e-02 9.998881e-01"/> -->
+<!--     <param name="extTransV" type="double" value="-8.086759e-01 3.195559e-01 -7.997231e-01"/> -->
+
+
+
 
     <node pkg="faloamBA" type="front_end" name="front_end" output="screen" />
     <node pkg="faloamBA" type="laserMapping" name="laserMapping" output="screen" />

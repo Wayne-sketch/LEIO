@@ -18,7 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   tf
   pcl_ros
-  livox_ros_driver
+#  livox_ros_driver
 )
 
 find_package(Eigen3 REQUIRED)

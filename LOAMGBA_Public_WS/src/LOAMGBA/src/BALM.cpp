@@ -213,7 +213,7 @@ int main(int argc, char **argv)
     double corn_filter_length = 0.2;
 
     int window_size = 10;// sliding window size
-    int margi_size = 2;// margilization size
+    int margi_size = 3;// margilization size
     int filter_num = 1;// for map-refine LM optimizer
     int thread_num = 2;// for map-refine LM optimizer
     int skip_num = 0;
@@ -412,7 +412,7 @@ int main(int argc, char **argv)
         // Put current feature points into root voxel node 创建根节点(论文中的方形节点)
         // ground_map和window_size是全局变量
         // 地图由哈希表和八叉树构成，哈希表管理最上层的地图结构，八叉树每个节点中存放一个平面，如果一个节点中的点不能被表示为一个特征，拆分(recut)这个节点
-        cut_voxel(ground_map, pl_plane, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
+        cut_voxel(ground_map, pl_ground, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
         //后续地图的点被送到对应的节点中，在面特征稳定后删除旧的观测，只保留最新观测，如果新的观测和旧的观测冲突，删去旧估计重写估计位姿。
 
         if(useEdge)

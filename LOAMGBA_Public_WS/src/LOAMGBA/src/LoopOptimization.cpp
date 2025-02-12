@@ -96,14 +96,22 @@ double imuGyrBiasN = 3.5640318696367613e-05;
 double imuGravity = 9.80511;           // 重力加速度
 double imuRPYWeight = 0.01; //not used
 //给的是imu to lidar
-vector<double> extRotV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
-                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
-                   2.024406e-03, 1.482454e-02, 9.998881e-01};
-vector<double> extRPYV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
-                   -7.854027e-04, 9.998898e-01, -1.482298e-02,
-                   2.024406e-03, 1.482454e-02, 9.998881e-01};
-vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
-Eigen::Matrix3d extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);     // xyz坐标系旋转
+// vector<double> extRotV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+//                    -7.854027e-04, 9.998898e-01, -1.482298e-02,
+//                    2.024406e-03, 1.482454e-02, 9.998881e-01};
+// For KITTI
+// vector<double> extRPYV = {9.999976e-01, 7.553071e-04, -2.035826e-03,
+//                    -7.854027e-04, 9.998898e-01, -1.482298e-02,
+//                    2.024406e-03, 1.482454e-02, 9.998881e-01};
+// vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
+
+//For ouster imu to ouster lidar
+vector<double> extRPYV = {-1, 0, 0,
+							0, -1, 0,
+							0, 0, 1};
+vector<double> extTransV = {-0.006253, 0.011775, -0.028535};
+
+// Eigen::Matrix3d extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);     // xyz坐标系旋转
 Eigen::Matrix3d extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);     // RPY欧拉角的变换关系
 Eigen::Vector3d extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);   // xyz坐标系平移
 Eigen::Quaterniond extQRPY = Eigen::Quaterniond(extRPY).inverse();
@@ -231,7 +239,7 @@ enum EstimatorStageFlag {
 //需要把变量都改一下
 struct EstimatorConfig {
   size_t window_size = 10;
-  size_t opt_window_size = 5;
+  size_t opt_window_size = 1;
   int init_window_factor = 1;
   int estimate_extrinsic = 1; //not used
 
@@ -1128,7 +1136,7 @@ void DoubleToVector() {
   double r_diff = origin_R0.z() - origin_R00.z();
 
   //TODO
-  Matrix3d rot_diff = ypr2R(Vector3d(y_diff, 0, 0));
+  Matrix3d rot_diff = ypr2R(Vector3d(y_diff, p_diff, 0));
   if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0) {
     ROS_DEBUG("euler singular point!");
     rot_diff = Rs_[pivot_idx] * Eigen::Quaterniond(para_pose_[0][6],
@@ -1465,7 +1473,7 @@ void SolveOptimization() {
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
   pointcloud_count++;
-//  std::cout << "平均每帧点面残差数量：" << planar_pointcloud_constraint_count/pointcloud_count << std::endl;
+  std::cout << "平均每帧点面残差数量：" << planar_pointcloud_constraint_count/pointcloud_count << std::endl;
 //  std::cout << "点面残差约束数量：" << planar_pointcloud_constraint_count <<std::endl;
 //  planar_pointcloud_constraint_count = 0;
 
@@ -3392,9 +3400,9 @@ void imuHandler(const sensor_msgs::ImuConstPtr &imu_msg)
 
     //test bias
     sensor_msgs::ImuPtr new_imu_msg = boost::make_shared<sensor_msgs::Imu>(*imu_msg);
-    new_imu_msg->linear_acceleration.x += 0.0;
-    new_imu_msg->linear_acceleration.y += 0.0;
-    new_imu_msg->linear_acceleration.z += 0.0;
+    new_imu_msg->linear_acceleration.x += 0.1;
+    new_imu_msg->linear_acceleration.y += 0.1;
+    new_imu_msg->linear_acceleration.z += 0.1;
     new_imu_msg->angular_velocity.x += 0.0;
     new_imu_msg->angular_velocity.y += 0.0;
     new_imu_msg->angular_velocity.z += 0.0;
@@ -3584,8 +3592,8 @@ void process_lio()
 //                std::ofstream pose1("/media/ctx/0BE20E8D0BE20E8D/kitti_result/boostLIO/0027_07/run-time/boostLIO_0027.txt", std::ios::app);
 //				pose1.setf(std::ios::scientific, std::ios::floatfield);
 //                pose1.precision(9);
-//                static double timeStart = odomAftLioPivot.header.stamp.toSec();
-//                auto T1 = ros::Time().fromSec(timeStart);
+                static double timeStart = odomAftLioPivot.header.stamp.toSec();
+                auto T1 = ros::Time().fromSec(timeStart);
 //                pose1<< odomAftLioPivot.header.stamp - T1 << " "
 //                     << odomAftLioPivot.pose.pose.position.x << " "
 //					 << odomAftLioPivot.pose.pose.position.y << " "
@@ -3597,23 +3605,23 @@ void process_lio()
 //                pose1.close();
 
             	//IMU零偏收敛实验
-//                auto currentTime = odomAftLioPivot.header.stamp - T1;
-//            	Eigen::Vector3d accelerometer_bias = Bas_[0];
-//            	Eigen::Vector3d gyroscope_bias = Bgs_[0];
-//            	std::ofstream outfile("/media/ctx/0BE20E8D0BE20E8D/kitti_result/boostLIO/0027_07/imu_bias/imu_bias_a0.1_0.0_0027opt=2.txt", std::ios::app);
-//            	if (outfile.is_open()) {
-//                	//将偏置写入文件
-//                	// outfile << "Accelerometer Bias: " << accelerometer_bias.transpose() << std::endl;
-//                	// outfile << "Gyroscope Bias: " << gyroscope_bias.transpose() << std::endl;
-//                	outfile << std::fixed << std::setprecision(9) << currentTime << ","
-//                    	    << accelerometer_bias.x() << "," << accelerometer_bias.y() << "," << accelerometer_bias.z() << ","
-//                        	<< gyroscope_bias.x() << "," << gyroscope_bias.y() << "," << gyroscope_bias.z() << std::endl;
-//                	//关闭文件
-//                	outfile.close();
-//                	// std::cout << "Bias values have been written to imu_bias.txt" << std::endl;
-//            	} else {
-//                	std::cerr << "Unable to open file for writing" <<std::endl;
-//            	}
+                auto currentTime = odomAftLioPivot.header.stamp - T1;
+            	Eigen::Vector3d accelerometer_bias = Bas_[0];
+            	Eigen::Vector3d gyroscope_bias = Bgs_[0];
+            	std::ofstream outfile("/media/ctx/0BE20E8D0BE20E8D/kitti_result/boostLIO/0027_07/imu_bias/imu_bias_a0.1_0.0_0027opt=1.txt", std::ios::app);
+            	if (outfile.is_open()) {
+                	//将偏置写入文件
+                	// outfile << "Accelerometer Bias: " << accelerometer_bias.transpose() << std::endl;
+                	// outfile << "Gyroscope Bias: " << gyroscope_bias.transpose() << std::endl;
+                	outfile << std::fixed << std::setprecision(9) << currentTime << ","
+                    	    << accelerometer_bias.x() << "," << accelerometer_bias.y() << "," << accelerometer_bias.z() << ","
+                        	<< gyroscope_bias.x() << "," << gyroscope_bias.y() << "," << gyroscope_bias.z() << std::endl;
+                	//关闭文件
+                	outfile.close();
+                	// std::cout << "Bias values have been written to imu_bias.txt" << std::endl;
+            	} else {
+                	std::cerr << "Unable to open file for writing" <<std::endl;
+            	}
 
             	//发布轨迹
             	geometry_msgs::PoseStamped laserAfterLioPose;
@@ -3726,11 +3734,28 @@ int main(int argc, char **argv)
 	ros::init(argc, argv, "laserPGO");
 //    ROS_FATAL("11111111111111111111111111111111111111111111111111111111111");
 	ros::NodeHandle nh;
-    // 读取参数
+    // 读取IMU参数
 	nh.getParam("imuAccNoise", imuAccNoise);
    	nh.getParam("imuGyrNoise", imuGyrNoise);
 	nh.getParam("imuAccBiasN", imuAccBiasN);
 	nh.getParam("imuGyrBiasN", imuGyrBiasN);
+
+	// 读取IMU到Lidar外参
+	// 读取 extRPYV
+	// if (nh.getParam("extRPYV", extRPYV)) {
+	// 	ROS_INFO("Loaded extRPYV successfully.");
+	// } else {
+	// 	ROS_ERROR("Failed to load extRPYV.");
+	// }
+	// // 读取 extTransV
+	// if (nh.getParam("extTransV", extTransV)) {
+	// 	ROS_INFO("Loaded extTransV successfully.");
+	// } else {
+	// 	ROS_ERROR("Failed to load extTransV.");
+	// }
+	// extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);     // RPY欧拉角的变换关系
+	// extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);   // xyz坐标系平移
+	// extQRPY = Eigen::Quaterniond(extRPY).inverse();
 
     //todo 全局变量初始化
     down_size_filter_corner_.setLeafSize(estimator_config_.corner_filter_size, estimator_config_.corner_filter_size, estimator_config_.corner_filter_size);
