@@ -11,12 +11,12 @@
 // dot and cross production 
  
 template<typename T> 
-inline T DotProduct(const T x[3], const T y[3]) {
+inline T selfDotProduct(const T x[3], const T y[3]) {
   return (x[0] * y[0] + x[1] * y[1] + x[2] * y[2]);
 }
  
 template<typename T>
-inline void CrossProduct(const T x[3], const T y[3], T result[3]){
+inline void selfCrossProduct(const T x[3], const T y[3], T result[3]){
   result[0] = x[1] * y[2] - x[2] * y[1];
   result[1] = x[2] * y[0] - x[0] * y[2];
   result[2] = x[0] * y[1] - x[1] * y[0];
@@ -95,9 +95,9 @@ inline void QuaternionToAngleAxis(const T* quaternion, T* angle_axis){
  
  
 template<typename T>
-inline void AngleAxisRotatePoint(const T angle_axis[3], const T pt[3], T result[3]) 
+inline void selfAngleAxisRotatePoint(const T angle_axis[3], const T pt[3], T result[3])
 {
-  const T theta2 = DotProduct(angle_axis, angle_axis);
+  const T theta2 = selfDotProduct(angle_axis, angle_axis);
   if (theta2 > T(std::numeric_limits<double>::epsilon())) 
   {
     // Away from zero, use the rodriguez formula
@@ -125,10 +125,10 @@ inline void AngleAxisRotatePoint(const T angle_axis[3], const T pt[3], T result[
                               w[2] * pt[0] - w[0] * pt[2],
                               w[0] * pt[1] - w[1] * pt[0] };*/
     T w_cross_pt[3];
-    CrossProduct(w, pt, w_cross_pt);                          
+    selfCrossProduct(w, pt, w_cross_pt);
  
  
-    const T tmp = DotProduct(w, pt) * (T(1.0) - costheta);
+    const T tmp = selfDotProduct(w, pt) * (T(1.0) - costheta);
     //    (w[0] * pt[0] + w[1] * pt[1] + w[2] * pt[2]) * (T(1.0) - costheta);
  
     result[0] = pt[0] * costheta + w_cross_pt[0] * sintheta + w[0] * tmp;
@@ -156,7 +156,7 @@ inline void AngleAxisRotatePoint(const T angle_axis[3], const T pt[3], T result[
                               angle_axis[2] * pt[0] - angle_axis[0] * pt[2],
                               angle_axis[0] * pt[1] - angle_axis[1] * pt[0] };*/
     T w_cross_pt[3];
-    CrossProduct(angle_axis, pt, w_cross_pt); 
+    selfCrossProduct(angle_axis, pt, w_cross_pt);
  
     result[0] = pt[0] + w_cross_pt[0];
     result[1] = pt[1] + w_cross_pt[1];

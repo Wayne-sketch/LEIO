@@ -37,7 +37,7 @@ pcl::PointCloud<PointType> global;
 
 bool useEdge;
 mutex mBuf;
-queue<sensor_msgs::PointCloud2ConstPtr> ground_buf, corn_buf, offground_buf;
+queue<sensor_msgs::PointCloud2ConstPtr> ground_buf, corn_buf, offground_buf, surf_buf;
 queue<nav_msgs::Odometry::ConstPtr> odom_buf;
 nav_msgs::Path laserTransformSumPath;
 
@@ -55,6 +55,12 @@ void corn_handler(const sensor_msgs::PointCloud2ConstPtr &msg)
     mBuf.unlock();
 }
 
+void surf_handler(const sensor_msgs::PointCloud2ConstPtr &msg)
+{
+    mBuf.lock();
+    surf_buf.push(msg);
+    mBuf.unlock();
+}
 
 void odom_handler(const nav_msgs::Odometry::ConstPtr &msg)
 {
@@ -186,6 +192,8 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
 
     ros::Subscriber sub_corn = n.subscribe<sensor_msgs::PointCloud2>("/Edge", 100, corn_handler);
+    ros::Subscriber sub_surf = n.subscribe<sensor_msgs::PointCloud2>("/Surf", 100, surf_handler);
+
     ros::Subscriber sub_ground = n.subscribe<sensor_msgs::PointCloud2>("/Ground", 100, ground_handler);
     ros::Subscriber sub_offground = n.subscribe<sensor_msgs::PointCloud2>("/OffGround", 100, offground_handler);
     ros::Subscriber sub_odom = n.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 100, odom_handler);
@@ -212,8 +220,8 @@ int main(int argc, char **argv)
     double ground_filter_length = 0.4;
     double corn_filter_length = 0.2;
 
-    int window_size = 10;// sliding window size
-    int margi_size = 3;// margilization size
+    int window_size = 20;// sliding window size
+    int margi_size = 5;// margilization size
     int filter_num = 1;// for map-refine LM optimizer
     int thread_num = 2;// for map-refine LM optimizer
     int skip_num = 0;
@@ -244,9 +252,10 @@ int main(int argc, char **argv)
 
     //todo 记录时间戳
     vector<uint64_t> pl_time_buf;
-    vector<pcl::PointCloud<PointType>::Ptr> pl_ground_buf;
+    // vector<pcl::PointCloud<PointType>::Ptr> pl_ground_buf;
     vector<pcl::PointCloud<PointType>::Ptr> pl_edge_buf;
-    vector<pcl::PointCloud<PointType>::Ptr> pl_offground_buf;
+    vector<pcl::PointCloud<PointType>::Ptr> pl_surf_buf;
+    // vector<pcl::PointCloud<PointType>::Ptr> pl_offground_buf;
 
     vector<Eigen::Quaterniond> q_poses;
     vector<Eigen::Vector3d> t_poses;
@@ -264,52 +273,65 @@ int main(int argc, char **argv)
         // 记录BALM开始时间
         auto start_BALM = std::chrono::high_resolution_clock::now();
         ros::spinOnce();
-        if(corn_buf.empty() || ground_buf.empty()  || odom_buf.empty() || offground_buf.empty())
+        // if(corn_buf.empty() || ground_buf.empty()  || odom_buf.empty() || offground_buf.empty())
+        if(corn_buf.empty() || surf_buf.empty() || odom_buf.empty())
         {
             continue;
         }
 
         mBuf.lock();
         uint64_t time_corn = corn_buf.front()->header.stamp.toNSec();
-        uint64_t time_ground = ground_buf.front()->header.stamp.toNSec();
+        uint64_t time_surf = surf_buf.front()->header.stamp.toNSec();
+        // uint64_t time_ground = ground_buf.front()->header.stamp.toNSec();
         uint64_t time_odom = odom_buf.front()->header.stamp.toNSec();
-        uint64_t time_offground = offground_buf.front()->header.stamp.toNSec();
+        // uint64_t time_offground = offground_buf.front()->header.stamp.toNSec();
         if(time_odom != time_corn)
         {
             time_odom < time_corn ? odom_buf.pop() : corn_buf.pop();
             mBuf.unlock();
             continue;
         }
-        if(time_odom != time_ground)
+        if(time_odom != time_surf)
         {
-            time_odom < time_ground ? odom_buf.pop() : ground_buf.pop();
+            time_odom < time_surf ? odom_buf.pop() : surf_buf.pop();
             mBuf.unlock();
             continue;
         }
+        // if(time_odom != time_ground)
+        // {
+        //     time_odom < time_ground ? odom_buf.pop() : ground_buf.pop();
+        //     mBuf.unlock();
+        //     continue;
+        // }
+        //
+        // if(time_odom != time_offground)
+        // {
+        //     time_odom < time_ground ? odom_buf.pop() : ground_buf.pop();
+        //     mBuf.unlock();
+        //     continue;
+        // }
 
-        if(time_odom != time_offground)
-        {
-            time_odom < time_ground ? odom_buf.pop() : ground_buf.pop();
-            mBuf.unlock();
-            continue;
-        }
-
-        ros::Time ct(ground_buf.front()->header.stamp);
-        pcl::PointCloud<PointType>::Ptr pl_ground_temp(new pcl::PointCloud<PointType>);
+        ros::Time ct(odom_buf.front()->header.stamp);
+        // pcl::PointCloud<PointType>::Ptr pl_ground_temp(new pcl::PointCloud<PointType>);
         pcl::PointCloud<PointType>::Ptr pl_edge_temp(new pcl::PointCloud<PointType>);
-        pcl::PointCloud<PointType>::Ptr pl_offground_temp(new pcl::PointCloud<PointType>);
+        pcl::PointCloud<PointType>::Ptr pl_surf_temp(new pcl::PointCloud<PointType>);
+        // pcl::PointCloud<PointType>::Ptr pl_offground_temp(new pcl::PointCloud<PointType>);
 
-        rosmsg2ptype(*ground_buf.front(), *pl_ground);
+        // rosmsg2ptype(*ground_buf.front(), *pl_ground);
         rosmsg2ptype(*corn_buf.front(), *pl_corn);
-        rosmsg2ptype(*offground_buf.front(), *pl_offground);
+        rosmsg2ptype(*surf_buf.front(), *pl_plane);
+        // rosmsg2ptype(*offground_buf.front(), *pl_offground);
 
         //pcl::io::savePCDFileBinary("/home/wb/FALOAMBA_WS/wb/Map/map.pcd", *pl_ground);
 
-        *pl_plane = *pl_ground + *pl_offground;
-        *pl_ground_temp = *pl_ground;
+        // *pl_plane = *pl_ground + *pl_offground;
+        // *pl_ground_temp = *pl_ground;
         *pl_edge_temp = *pl_corn;
-        *pl_offground_temp = *pl_offground;
-        corn_buf.pop(); ground_buf.pop(); offground_buf.pop();
+        *pl_surf_temp = *pl_plane;
+        // *pl_offground_temp = *pl_offground;
+        corn_buf.pop();
+        surf_buf.pop();
+        // ground_buf.pop(); offground_buf.pop();
 
         q_odom.w() = odom_buf.front()->pose.pose.orientation.w;
         q_odom.x() = odom_buf.front()->pose.pose.orientation.x;
@@ -389,20 +411,21 @@ int main(int argc, char **argv)
 
         // 发布优化前的位姿
         pub_pose.publish(parray);
-        pl_ground_buf.push_back(pl_ground_temp);
+        // pl_ground_buf.push_back(pl_ground_temp);
         //记录每一帧的时间戳 要和pl_ground_buf对应起来
         pl_time_buf.push_back(time_odom);
         pl_edge_buf.push_back(pl_edge_temp);
-        pl_offground_buf.push_back(pl_offground_temp);
+        pl_surf_buf.push_back(pl_surf_temp);
+        // pl_offground_buf.push_back(pl_offground_temp);
 
         plcount++;
         OCTO_TREE::voxel_windowsize = plcount - window_base;
         q_gather_pose.setIdentity();
         t_gather_pose.setZero();
 
-        down_sampling_voxel(*pl_ground, ground_filter_length);
+        // down_sampling_voxel(*pl_ground, ground_filter_length);
         down_sampling_voxel(*pl_plane, ground_filter_length);
-        down_sampling_voxel(*pl_offground, ground_filter_length);
+        // down_sampling_voxel(*pl_offground, ground_filter_length);
         if(useEdge)
         {
             down_sampling_voxel(*pl_corn, corn_filter_length);
@@ -412,7 +435,7 @@ int main(int argc, char **argv)
         // Put current feature points into root voxel node 创建根节点(论文中的方形节点)
         // ground_map和window_size是全局变量
         // 地图由哈希表和八叉树构成，哈希表管理最上层的地图结构，八叉树每个节点中存放一个平面，如果一个节点中的点不能被表示为一个特征，拆分(recut)这个节点
-        cut_voxel(ground_map, pl_ground, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
+        cut_voxel(ground_map, pl_plane, q_poses[plcount-1].matrix(), t_poses[plcount-1], 0, frame_head, window_size);
         //后续地图的点被送到对应的节点中，在面特征稳定后删除旧的观测，只保留最新观测，如果新的观测和旧的观测冲突，删去旧估计重写估计位姿。
 
         if(useEdge)
@@ -508,20 +531,21 @@ int main(int argc, char **argv)
                 trans.block<3, 1>(0, 3) = opt_lsv.t_poses[i];
 
                 pcl::PointCloud<PointType> pcloud;
-                if(viewVoxel)
-                {
-                    // 优化后的位姿乘以其对应帧的点云
-                    pcl::transformPointCloud((*pl_offground_buf[window_base + i]), pcloud, trans);
-                    IMUST T;
-                    T.R = trans.block<3, 3>(0, 0);
-                    T.p = trans.block<3, 1>(0, 3);
-
-                    cut_voxel2(ground_map2, *pl_ground_buf[window_base + i], T, i);
-                }
-                else
-                {
-                    pcl::transformPointCloud((*pl_ground_buf[window_base + i]+*pl_offground_buf[window_base + i]), pcloud, trans);
-                }
+                // if(viewVoxel)
+                // {
+                //     // 优化后的位姿乘以其对应帧的点云
+                //     pcl::transformPointCloud((*pl_offground_buf[window_base + i]), pcloud, trans);
+                //     IMUST T;
+                //     T.R = trans.block<3, 3>(0, 0);
+                //     T.p = trans.block<3, 1>(0, 3);
+                //
+                //     cut_voxel2(ground_map2, *pl_ground_buf[window_base + i], T, i);
+                // }
+                // else
+                // {
+                //     pcl::transformPointCloud((*pl_ground_buf[window_base + i]+*pl_offground_buf[window_base + i]), pcloud, trans);
+                // }
+                pcl::transformPointCloud((*pl_surf_buf[window_base + i]), pcloud, trans);
 
                 // margi_size帧组成的局部地图
                 pl_send += pcloud;
@@ -572,22 +596,22 @@ int main(int argc, char **argv)
   }
                 // ----------------------------------- for loop ----------------------------------------
                 // 合并 ground 和 offground 点云
-				pcl::PointCloud<PointType>::Ptr combined_cloud(new pcl::PointCloud<PointType>());
-				*combined_cloud += *pl_ground_buf[window_base + i];
-				*combined_cloud += *pl_offground_buf[window_base + i];
-				// 将合并后的点云转换为 ROS 消息
-				sensor_msgs::PointCloud2 surf_msg;
-				pcl::toROSMsg(*combined_cloud, surf_msg);
-				surf_msg.header.stamp = time;
-				surf_msg.header.frame_id = "camera_init";
-                pubSurf.publish(surf_msg);
+				// pcl::PointCloud<PointType>::Ptr combined_cloud(new pcl::PointCloud<PointType>());
+				// *combined_cloud += *pl_ground_buf[window_base + i];
+				// *combined_cloud += *pl_offground_buf[window_base + i];
+				// // 将合并后的点云转换为 ROS 消息
+				// sensor_msgs::PointCloud2 surf_msg;
+				// pcl::toROSMsg(*combined_cloud, surf_msg);
+				// surf_msg.header.stamp = time;
+				// surf_msg.header.frame_id = "camera_init";
+    //             pubSurf.publish(surf_msg);
 
-                sensor_msgs::PointCloud2 ground_msg;
-                pcl::toROSMsg(  *pl_ground_buf[window_base + i], ground_msg);
-                ground_msg.header.stamp = time;
-                ground_msg.header.frame_id = "camera_init";
-                pubground.publish(ground_msg);
-                pl_ground_buf[window_base + i]->clear();
+                // sensor_msgs::PointCloud2 ground_msg;
+                // pcl::toROSMsg(  *pl_ground_buf[window_base + i], ground_msg);
+                // ground_msg.header.stamp = time;
+                // ground_msg.header.frame_id = "camera_init";
+                // pubground.publish(ground_msg);
+                // pl_ground_buf[window_base + i]->clear();
 
                 sensor_msgs::PointCloud2 edge_msg;
                 pcl::toROSMsg(*pl_edge_buf[window_base + i], edge_msg);
@@ -596,12 +620,18 @@ int main(int argc, char **argv)
                 pubEdge.publish(edge_msg);
                 pl_edge_buf[window_base + i]->clear();
 
-                sensor_msgs::PointCloud2 offground_msg;
-                pcl::toROSMsg(*pl_offground_buf[window_base + i], offground_msg);
-                offground_msg.header.stamp = time;
-                offground_msg.header.frame_id = "camera_init";
-                puboffgrounds.publish(offground_msg);
-                pl_offground_buf[window_base + i]->clear();
+                sensor_msgs::PointCloud2 surf_msg;
+                pcl::toROSMsg(*pl_surf_buf[window_base + i], surf_msg);
+                surf_msg.header.stamp = time;
+                surf_msg.header.frame_id = "camera_init";
+                pubSurf.publish(surf_msg);
+
+                // sensor_msgs::PointCloud2 offground_msg;
+                // pcl::toROSMsg(*pl_offground_buf[window_base + i], offground_msg);
+                // offground_msg.header.stamp = time;
+                // offground_msg.header.frame_id = "camera_init";
+                // puboffgrounds.publish(offground_msg);
+                // pl_offground_buf[window_base + i]->clear();
             }
 
             //global += pl_send;
@@ -622,24 +652,25 @@ int main(int argc, char **argv)
 
             for(int i=0; i<margi_size; i++)
             {
-                pl_ground_buf[window_base + i] = nullptr;
+                // pl_ground_buf[window_base + i] = nullptr;
                 pl_edge_buf[window_base + i] = nullptr;
-                pl_offground_buf[window_base + i] = nullptr;
+                pl_surf_buf[window_base + i] = nullptr;
+                // pl_offground_buf[window_base + i] = nullptr;
             }
 
             for(int i=0; i<window_size; i++)
             {
                 q_poses[window_base + i] = opt_lsv.so3_poses[i].unit_quaternion();
                 t_poses[window_base + i] = opt_lsv.t_poses[i];
-                if(0)
-                {
-                    trans.block<3, 3>(0, 0) = opt_lsv.so3_poses[i].matrix();
-                    trans.block<3, 1>(0, 3) = opt_lsv.t_poses[i];
-                    pcl::PointCloud<PointType> pcloud;
-                    pcl::transformPointCloud((*pl_ground_buf[window_base + i]+*pl_offground_buf[window_base + i]), pcloud, trans);
-                    pl_send += pcloud;
-
-                }
+                // if(0)
+                // {
+                //     trans.block<3, 3>(0, 0) = opt_lsv.so3_poses[i].matrix();
+                //     trans.block<3, 1>(0, 3) = opt_lsv.t_poses[i];
+                //     pcl::PointCloud<PointType> pcloud;
+                //     pcl::transformPointCloud((*pl_ground_buf[window_base + i]+*pl_offground_buf[window_base + i]), pcloud, trans);
+                //     pl_send += pcloud;
+                //
+                // }
             }
 
             pub_func(pl_send, pub_full, ct);
@@ -690,7 +721,7 @@ int main(int argc, char **argv)
         sum_BALM += elapsed_BALM.count();
         laser_count++;
         double averageTime_BALM = sum_BALM / laser_count;
-        std::cout << "BALM 平均用时" << averageTime_BALM << " ms" << std::endl;
+        // std::cout << "BALM 平均用时" << averageTime_BALM << " ms" << std::endl;
 
     }
 }

@@ -1822,344 +1822,8 @@
 			"path" : "/usr/local/lib/cmake/Ceres/CeresConfig.cmake"
 		},
 		{
-			"isCMake" : true,
 			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeFindDependencyMacro.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeFindDependencyMacro.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isExternal" : true,
-			"path" : "/usr/local/lib/cmake/Ceres/FindCXSparse.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isExternal" : true,
-			"path" : "/usr/local/lib/cmake/Ceres/FindSuiteSparse.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindBLAS.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckFunctionExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindLAPACK.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckFunctionExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindBLAS.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckFunctionExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindThreads.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckLibraryExists.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckIncludeFile.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeParseArguments.cmake"
-		},
-		{
-			"isExternal" : true,
-			"path" : "/usr/lib/x86_64-linux-gnu/cmake/TBB/TBBConfigVersion.cmake"
-		},
-		{
-			"isExternal" : true,
-			"path" : "/usr/lib/x86_64-linux-gnu/cmake/TBB/TBBConfig.cmake"
-		},
-		{
-			"isExternal" : true,
-			"path" : "/usr/local/lib/cmake/Ceres/FindMETIS.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
-		},
-		{
-			"isCMake" : true,
-			"isExternal" : true,
-			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
+			"path" : "/usr/local/lib/cmake/Ceres/FindEigen.cmake"
 		},
 		{
 			"isExternal" : true,
@@ -2172,6 +1836,20 @@
 		{
 			"isExternal" : true,
 			"path" : "/usr/share/eigen3/cmake/Eigen3Targets.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "/usr/local/lib/cmake/Ceres/FindGlog.cmake"
 		},
 		{
 			"isExternal" : true,
@@ -2199,6 +1877,20 @@
 			"path" : "/usr/local/lib/cmake/glog/glog-targets-noconfig.cmake"
 		},
 		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "/usr/local/lib/cmake/Ceres/FindGflags.cmake"
+		},
+		{
 			"isExternal" : true,
 			"path" : "/usr/local/lib/cmake/gflags/gflags-config-version.cmake"
 		},
@@ -2213,6 +1905,16 @@
 		{
 			"isExternal" : true,
 			"path" : "/usr/local/lib/cmake/gflags/gflags-nonamespace-targets-release.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageHandleStandardArgs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindPackageMessage.cmake"
 		},
 		{
 			"isExternal" : true,

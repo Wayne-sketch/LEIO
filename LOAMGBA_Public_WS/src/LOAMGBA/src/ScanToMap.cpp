@@ -92,7 +92,7 @@ const int laserCloudHeight = 21;
 const int laserCloudDepth = 11;
 
 
-ofstream os_pose;
+// ofstream os_pose;
 
 
 
@@ -175,6 +175,7 @@ ros::Publisher pubLaserCloudSurround, pubLaserCloudMap, pubLaserCloudFullRes, pu
 ros::Publisher pubOffGround;
 ros::Publisher pubGround;
 ros::Publisher pubEdge;
+ros::Publisher pubSurf;
 ros::Publisher pubOffGround_view;
 ros::Publisher pubGround_view;
 ros::Publisher pubEdge_view;
@@ -313,7 +314,8 @@ void process()
 {
     while(ros::ok())
     {
-        while (!cornerLastBuf.empty() && !surfLastBuf.empty() && !odometryBuf.empty() && !centerBuf.empty() )// && !imageBuf.empty()
+        // while (!cornerLastBuf.empty() && !surfLastBuf.empty() && !odometryBuf.empty() && !centerBuf.empty() )// && !imageBuf.empty()
+        while (!cornerLastBuf.empty() && !surfLastBuf.empty() && !odometryBuf.empty())// && !imageBuf.empty()
         {
             // laserOdometry模块对本节点的执行频率进行了控制，laserOdometry模块publish的位姿是10Hz，点云的publish频率则可以没这么高
             // 为了保证LOAM算法整体的实时性，Mapping线程每次只处理cornerLastBuf.front()及其他与之时间同步的消息
@@ -350,28 +352,30 @@ void process()
             // 	break;
             // }
             // 以cornerLastBuf为基准，把时间戳小于它的全部pop
-            while (!centerBuf.empty() && centerBuf.front()->header.stamp.toSec() < cornerLastBuf.front()->header.stamp.toSec())
-            {
-                centerBuf.pop();
-            }
-
-            if (centerBuf.empty())
-            {
-                mBuf.unlock();
-                break;
-            }
+            // while (!centerBuf.empty() && centerBuf.front()->header.stamp.toSec() < cornerLastBuf.front()->header.stamp.toSec())
+            // {
+            //     centerBuf.pop();
+            // }
+            //
+            // if (centerBuf.empty())
+            // {
+            //     mBuf.unlock();
+            //     break;
+            // }
 
             timeLaserCloudCornerLast = cornerLastBuf.front()->header.stamp.toSec();
             timeLaserCloudSurfLast = surfLastBuf.front()->header.stamp.toSec();
             //timeLaserCloudFullRes = fullResBuf.front()->header.stamp.toSec();
             timeLaserOdometry = odometryBuf.front()->header.stamp.toSec();
-            timecenter = centerBuf.front()->header.stamp.toSec();
+            // timecenter = centerBuf.front()->header.stamp.toSec();
             // timeimage = imageBuf.front()->header.stamp.toSec();
 
             //  timeimage != timeLaserOdometry || timeLaserCloudFullRes != timeLaserOdometry
+            // if (timeLaserCloudCornerLast != timeLaserOdometry ||
+            //     timeLaserCloudSurfLast != timeLaserOdometry ||
+            //     timecenter != timeLaserOdometry)
             if (timeLaserCloudCornerLast != timeLaserOdometry ||
-                timeLaserCloudSurfLast != timeLaserOdometry ||
-                timecenter != timeLaserOdometry)
+                    timeLaserCloudSurfLast != timeLaserOdometry)
             {
                 printf("time corner %f surf %f odom %f center %f\n", timeLaserCloudCornerLast, timeLaserCloudSurfLast,  timeLaserOdometry, timecenter);
                 //printf("unsync messeage!");
@@ -392,9 +396,9 @@ void process()
             // pcl::fromROSMsg(*fullResBuf.front(), *laserCloudFullRes);
             // fullResBuf.pop();
 
-            centerLast->clear();
-            pcl::fromROSMsg(*centerBuf.front(), *centerLast);
-            centerBuf.pop();
+            // centerLast->clear();
+            // pcl::fromROSMsg(*centerBuf.front(), *centerLast);
+            // centerBuf.pop();
 
             q_wodom_curr.x() = odometryBuf.front()->pose.pose.orientation.x;
             q_wodom_curr.y() = odometryBuf.front()->pose.pose.orientation.y;
@@ -405,6 +409,7 @@ void process()
             t_wodom_curr.z() = odometryBuf.front()->pose.pose.position.z;
             odometryBuf.pop();
             // 为了保证LOAM算法整体的实时性，因Mapping线程耗时>51ms导致的历史缓存都会被清空
+            //todo 这里有可能影响效果
             while(!cornerLastBuf.empty())
             {
                 cornerLastBuf.pop();
@@ -628,7 +633,6 @@ void process()
             // 将有效index的cube中的点云叠加到一起组成submap的特征点云
             laserCloudCornerFromMap->clear();
 
-
             for (int i = 0; i < laserCloudValidNum; i++)
             {
                 *laserCloudCornerFromMap += *laserCloudCornerArray[laserCloudValidInd[i]];
@@ -793,50 +797,57 @@ void process()
                 laserCloudCornerArray[ind] = tmpCorner;
 
             }
+
             //printf("filter time %f ms \n", t_filter.toc());
             TicToc t_pub;
-auto start_csf = std::chrono::high_resolution_clock::now();
-            CSF csf;
-            csf.params.iterations = 600;
-            csf.params.time_step = 0.95;
-            csf.params.cloth_resolution = 3;
-            csf.params.bSloopSmooth = false;
-
-            csf.setPointCloud(*laserCloudSurfLast);
-            // pcl::io::savePCDFileBinary(map_save_directory, *SurfFrame);
-
-            std::vector<int>  groundIndexes, offGroundIndexes;
-            // 输出的是vector<int>类型的地面点和非地面点索引
-            pcl::PointCloud<pcl::PointXYZI>::Ptr groundFrame(new pcl::PointCloud<pcl::PointXYZI>);
-            pcl::PointCloud<pcl::PointXYZI>::Ptr offGroundFrame(new pcl::PointCloud<pcl::PointXYZI>);
-            csf.do_filtering(groundIndexes, offGroundIndexes);
-            pcl::copyPointCloud(*laserCloudSurfLast, groundIndexes, *groundFrame);
-            pcl::copyPointCloud(*laserCloudSurfLast, offGroundIndexes, *offGroundFrame);
-
-// 记录CSF结束时间
-auto end_csf = std::chrono::high_resolution_clock::now();
-// 计算耗时并存储
-std::chrono::duration<double, std::milli> elapsed_scantoscan = end_csf - start_csf;
-// 计算平均时间
-sum_csf += elapsed_scantoscan.count();
-laser_count++;
-double averageTime_csf = sum_csf / laser_count;
-std::cout << "csf 平均用时" << averageTime_csf << " ms" << std::endl;
+// auto start_csf = std::chrono::high_resolution_clock::now();
+//             CSF csf;
+//             csf.params.iterations = 600; //600
+//             csf.params.time_step = 0.95; //0.95
+//             csf.params.cloth_resolution = 3; //3
+//             csf.params.bSloopSmooth = false; //false
+//
+//             csf.setPointCloud(*laserCloudSurfLast);
+//             // pcl::io::savePCDFileBinary(map_save_directory, *SurfFrame);
+//             std::vector<int>  groundIndexes, offGroundIndexes;
+//             // 输出的是vector<int>类型的地面点和非地面点索引
+//             pcl::PointCloud<pcl::PointXYZI>::Ptr groundFrame(new pcl::PointCloud<pcl::PointXYZI>);
+//             pcl::PointCloud<pcl::PointXYZI>::Ptr offGroundFrame(new pcl::PointCloud<pcl::PointXYZI>);
+// std::cout << "mark7" << std::endl;
+//             csf.do_filtering(groundIndexes, offGroundIndexes);
+// std::cout << "mark8" << std::endl;
+//             pcl::copyPointCloud(*laserCloudSurfLast, groundIndexes, *groundFrame);
+//             pcl::copyPointCloud(*laserCloudSurfLast, offGroundIndexes, *offGroundFrame);
+// // 记录CSF结束时间
+// auto end_csf = std::chrono::high_resolution_clock::now();
+// // 计算耗时并存储
+// std::chrono::duration<double, std::milli> elapsed_scantoscan = end_csf - start_csf;
+// // 计算平均时间
+// sum_csf += elapsed_scantoscan.count();
+// laser_count++;
+// double averageTime_csf = sum_csf / laser_count;
+// // std::cout << "csf 平均用时" << averageTime_csf << " ms" << std::endl;
 
 
             // ----------------------------------- for loop ----------------------------------------
-            sensor_msgs::PointCloud2 offGround_msg;
-            // centerLast、laserCloudFullRes、laserCloudSurfLast、laserCloudCornerLast
-            pcl::toROSMsg(*offGroundFrame, offGround_msg);
-            offGround_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            offGround_msg.header.frame_id = "camera_init";
-            pubOffGround.publish(offGround_msg);
+            // sensor_msgs::PointCloud2 offGround_msg;
+            // // centerLast、laserCloudFullRes、laserCloudSurfLast、laserCloudCornerLast
+            // pcl::toROSMsg(*offGroundFrame, offGround_msg);
+            // offGround_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            // offGround_msg.header.frame_id = "camera_init";
+            // pubOffGround.publish(offGround_msg);
 
-            sensor_msgs::PointCloud2 ground_msg;
-            pcl::toROSMsg(  *groundFrame, ground_msg);
-            ground_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
-            ground_msg.header.frame_id = "camera_init";
-            pubGround.publish(ground_msg);
+            // sensor_msgs::PointCloud2 ground_msg;
+            // pcl::toROSMsg(  *groundFrame, ground_msg);
+            // ground_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            // ground_msg.header.frame_id = "camera_init";
+            // pubGround.publish(ground_msg);
+
+            sensor_msgs::PointCloud2 surf_msg;
+            pcl::toROSMsg(  *laserCloudSurfLast, surf_msg);
+            surf_msg.header.stamp = ros::Time().fromSec(timeLaserOdometry);
+            surf_msg.header.frame_id = "camera_init";
+            pubSurf.publish(surf_msg);
 
             sensor_msgs::PointCloud2 edge_msg;
             pcl::toROSMsg(*laserCloudCornerLast, edge_msg);
@@ -878,7 +889,7 @@ std::cout << "csf 平均用时" << averageTime_csf << " ms" << std::endl;
             odomAftMapped.pose.pose.position.y = t_w_curr.y();
             odomAftMapped.pose.pose.position.z = t_w_curr.z();
 
-            os_pose << q_w_curr.x() << " " << q_w_curr.y()<< " "  << q_w_curr.z() << " " << q_w_curr.w() << " " << t_w_curr.x() << " " << t_w_curr.y() << " " << t_w_curr.z() << endl;
+            // os_pose << q_w_curr.x() << " " << q_w_curr.y()<< " "  << q_w_curr.z() << " " << q_w_curr.w() << " " << t_w_curr.x() << " " << t_w_curr.y() << " " << t_w_curr.z() << endl;
 
             // ---------------------- 发布优化后的位姿给Rviz 和 loop模块 ------------------------------
             pubOdomAftMapped.publish(odomAftMapped);
@@ -901,10 +912,10 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "laserMapping");
     ros::NodeHandle nh;
-    os_pose.open("/home/wb/SC_FASTLOAM_WS/wb/pose/poses.txt", std::fstream::out);
+    // os_pose.open("/home/wb/SC_FASTLOAM_WS/wb/pose/poses.txt", std::fstream::out);
 
-    float lineRes = 0;
-    float planeRes = 0;
+    float lineRes = 0.4;
+    float planeRes = 0.8;
     // 线特征点云的分辨率
     nh.param<float>("mapping_line_resolution", lineRes, 0.4);
     // 面特征点云的分辨率
@@ -922,7 +933,7 @@ int main(int argc, char **argv)
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 100, laserOdometryHandler);
 
     // 订阅质心
-    ros::Subscriber subCenter = nh.subscribe<sensor_msgs::PointCloud2>("/center", 100, centerHandler);
+    // ros::Subscriber subCenter = nh.subscribe<sensor_msgs::PointCloud2>("/center", 100, centerHandler);
 
     // submap所在cube中的点云，附近5帧组成的降采样子地图 for rviz
     pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 100);
@@ -935,6 +946,7 @@ int main(int argc, char **argv)
     pubOffGround = nh.advertise<sensor_msgs::PointCloud2>("/OffGround", 100);
     pubGround = nh.advertise<sensor_msgs::PointCloud2>("/Ground", 100);
     pubEdge = nh.advertise<sensor_msgs::PointCloud2>("/Edge", 100);
+    pubSurf = nh.advertise<sensor_msgs::PointCloud2>("/Surf", 100);
     pubOffGround_view = nh.advertise<sensor_msgs::PointCloud2>("/OffGround_view", 100);
     pubGround_view = nh.advertise<sensor_msgs::PointCloud2>("/Ground_view", 100);
     pubEdge_view = nh.advertise<sensor_msgs::PointCloud2>("/Edge_view", 100);

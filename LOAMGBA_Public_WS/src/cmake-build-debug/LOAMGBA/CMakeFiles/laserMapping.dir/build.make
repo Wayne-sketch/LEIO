@@ -446,7 +446,7 @@ devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libvtkViewsCore-7.1.s
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libvtkRenderingContextOpenGL2-7.1.so.7.1p.1
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libvtkRenderingOpenGL2-7.1.so.7.1p.1
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libflann_cpp.so
-devel/lib/faloamBA/laserMapping: /usr/local/lib/libceres.so.2.1.0
+devel/lib/faloamBA/laserMapping: /usr/local/lib/libceres.a
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libqhull.so
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libflann_cpp.so
 devel/lib/faloamBA/laserMapping: /opt/ros/noetic/lib/libdynamic_reconfigure_config_init_mutex.so
@@ -616,6 +616,35 @@ devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libXext.so
 devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libXt.so
 devel/lib/faloamBA/laserMapping: /usr/local/lib/libglog.so.0.7.0
 devel/lib/faloamBA/laserMapping: /usr/local/lib/libgflags.a
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libspqr.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libtbbmalloc.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libtbb.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcholmod.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libccolamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcolamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/liblapack.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libblas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libf77blas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libatlas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libsuitesparseconfig.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/librt.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcxsparse.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libtbbmalloc.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libtbb.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcholmod.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libccolamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcolamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libamd.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/liblapack.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libblas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libf77blas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libatlas.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libsuitesparseconfig.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/librt.so
+devel/lib/faloamBA/laserMapping: /usr/lib/x86_64-linux-gnu/libcxsparse.so
 devel/lib/faloamBA/laserMapping: LOAMGBA/CMakeFiles/laserMapping.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/ctx/LEIO/LOAMGBA_Public_WS/src/cmake-build-debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Linking CXX executable ../devel/lib/faloamBA/laserMapping"
 	cd /home/ctx/LEIO/LOAMGBA_Public_WS/src/cmake-build-debug/LOAMGBA && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/laserMapping.dir/link.txt --verbose=$(VERBOSE)

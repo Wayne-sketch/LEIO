@@ -102,7 +102,7 @@ Call Stack (most recent call first):
   LOAMGBA/CMakeLists.txt:25 (find_package)
 This warning is for project developers.  Use -Wno-dev to suppress it.
 
--- Eigen found (include: /usr/include/eigen3, version: 3.4.0)
+-- Eigen found (include: /usr/include/eigen3, version: 3.2.9)
 -- Found Boost: /usr/local/include (found suitable version "1.83.0", minimum required is "1.55.0") found components: system filesystem date_time iostreams regex
 CMake Warning (dev) at /usr/lib/x86_64-linux-gnu/cmake/pcl/Modules/FindFLANN.cmake:44 (find_package):
   Policy CMP0144 is not set: find_package uses upper-case <PACKAGENAME>_ROOT
@@ -527,31 +527,19 @@ Call Stack (most recent call first):
   LOAMGBA/CMakeLists.txt:25 (find_package)
 This warning is for project developers.  Use -Wno-dev to suppress it.
 
--- Found AMD headers in: /usr/include/suitesparse
--- Found AMD library: /usr/lib/x86_64-linux-gnu/libamd.so
--- Found CAMD headers in: /usr/include/suitesparse
--- Found CAMD library: /usr/lib/x86_64-linux-gnu/libcamd.so
--- Found CCOLAMD headers in: /usr/include/suitesparse
--- Found CCOLAMD library: /usr/lib/x86_64-linux-gnu/libccolamd.so
--- Found CHOLMOD headers in: /usr/include/suitesparse
--- Found CHOLMOD library: /usr/lib/x86_64-linux-gnu/libcholmod.so
--- Found COLAMD headers in: /usr/include/suitesparse
--- Found COLAMD library: /usr/lib/x86_64-linux-gnu/libcolamd.so
--- Found SPQR headers in: /usr/include/suitesparse
--- Found SPQR library: /usr/lib/x86_64-linux-gnu/libspqr.so
--- Found Config headers in: /usr/include/suitesparse
--- Found Config library: /usr/lib/x86_64-linux-gnu/libsuitesparseconfig.so
--- Found Intel Thread Building Blocks (TBB) library (2020.1 / 11101) include location: . Assuming SuiteSparseQR was compiled with TBB.
--- Adding librt to SuiteSparse_config libraries (required on Linux & Unix [not OSX] if SuiteSparse is compiled with timing).
--- Could NOT find METIS (missing: METIS_INCLUDE_DIR METIS_LIBRARY) 
--- Found required Ceres dependency: Eigen version 3.4.0 in /usr/share/eigen3/cmake
+-- Found installed version of Eigen: /usr/share/eigen3/cmake
+-- Found required Ceres dependency: Eigen version 3.2.9 in /usr/include/eigen3
+-- Found installed version of glog: /usr/local/lib/cmake/glog
+-- Detected glog version: 0.7.0
 -- Found required Ceres dependency: glog
+-- Found installed version of gflags: /usr/local/lib/cmake/gflags
+-- Detected gflags version: 2.2.2
 -- Found required Ceres dependency: gflags
--- Found Ceres version: 2.1.0 installed in: /usr/local with components: [EigenSparse, SparseLinearAlgebraLibrary, LAPACK, SuiteSparse, CXSparse, SchurSpecializations, Multithreading]
+-- Found Ceres version: 1.14.0 installed in: /usr/local with components: [EigenSparse, SparseLinearAlgebraLibrary, LAPACK, SuiteSparse, CXSparse, SchurSpecializations, OpenMP, Multithreading]
 -- Found Boost: /usr/local/include (found version "1.83.0") found components: timer
 -- GTSAM include directory:  /usr/local/lib/cmake/GTSAM/../../../include
 WARNING: Package name "faloamBA" does not follow the naming conventions. It should start with a lower case letter and only contain lower case letters, digits, underscores, and dashes.
--- Configuring done (2.9s)
+-- Configuring done (1.2s)
 CMake Warning at LOAMGBA/CMakeLists.txt:49 (add_executable):
   Cannot generate a safe runtime search path for target front_end because
   files in some directories may conflict with libraries in implicit
@@ -728,7 +716,7 @@ CMake Warning at LOAMGBA/CMakeLists.txt:72 (add_executable):
   Some of these libraries may not be found correctly.
 
 
--- Generating done (0.5s)
+-- Generating done (0.2s)
 CMake Warning at LOAMGBA/CMakeLists.txt:72 (add_executable):
   Cannot generate a safe runtime search path for target alaserPGO because
   files in some directories may conflict with libraries in implicit

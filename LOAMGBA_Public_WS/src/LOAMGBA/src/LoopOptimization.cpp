@@ -105,11 +105,11 @@ double imuRPYWeight = 0.01; //not used
 //                    2.024406e-03, 1.482454e-02, 9.998881e-01};
 // vector<double> extTransV = {-8.086759e-01, 3.195559e-01, -7.997231e-01};
 
-//For ouster imu to ouster lidar
-vector<double> extRPYV = {-1, 0, 0,
-							0, -1, 0,
+//For ouster imu to ouster sensor
+vector<double> extRPYV = {1, 0, 0,
+							0, 1, 0,
 							0, 0, 1};
-vector<double> extTransV = {-0.006253, 0.011775, -0.028535};
+vector<double> extTransV = {0.006253, -0.011775, 0.007645};
 
 // Eigen::Matrix3d extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);     // xyz坐标系旋转
 Eigen::Matrix3d extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);     // RPY欧拉角的变换关系
@@ -533,11 +533,16 @@ void CalculateFeatures(const pcl::KdTreeFLANN<PointT>::Ptr &kdtree_surf_from_map
 
   for (int i = 0; i < surf_points_size; i++) {
     point_ori = origin_surf_points->points[i];
+  	std::cout << "surf_points_size" << surf_points_size << std::endl;
+  	std::cout << "point_ori: " << point_ori << endl;
     //变到pivot系下
     PointAssociateToMap(point_ori, point_sel, transform_to_local);
 
     int num_neighbors = 5;
+  	std::cout << "point_sel: " << point_sel << std::endl;
+  	std::cout << "mark1" << std::endl;
     kdtree_surf_from_map->nearestKSearch(point_sel, num_neighbors, point_search_idx, point_search_sq_dis);
+  	std::cout << "mark2" << std::endl;
 
     if (point_search_sq_dis[num_neighbors - 1] < min_match_sq_dis_) {
       for (int j = 0; j < num_neighbors; j++) {
@@ -624,7 +629,9 @@ void CalculateFeatures(const pcl::KdTreeFLANN<PointT>::Ptr &kdtree_surf_from_map
   for (int i = 0; i < corner_points_size; i++) {
     point_ori = origin_corner_points->points[i];
     PointAssociateToMap(point_ori, point_sel, transform_to_local);
+  	std::cout << "mark3" << std::endl;
     kdtree_corner_from_map->nearestKSearch(point_sel, 5, point_search_idx, point_search_sq_dis);
+  	std::cout << "mark4" << std::endl;
 
     if (point_search_sq_dis[4] < min_match_sq_dis_) {
       Eigen::Vector3f vc(0, 0, 0);
@@ -1029,6 +1036,7 @@ TicToc t_kdtree;
   pcl::KdTreeFLANN<PointT>::Ptr kdtree_corner_from_map(new pcl::KdTreeFLANN<PointT>());
   kdtree_corner_from_map->setInputCloud(local_corner_points_filtered_ptr_);
 #endif
+
 //std::cout << "t_kdtree cost: " << t_kdtree.toc() << " ms" << std::endl;
 	for (int idx = 0; idx < estimator_config_.window_size + 1; ++idx) {
     	FeaturePerFrame feature_per_frame;
@@ -1473,7 +1481,7 @@ void SolveOptimization() {
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
   pointcloud_count++;
-  std::cout << "平均每帧点面残差数量：" << planar_pointcloud_constraint_count/pointcloud_count << std::endl;
+  // std::cout << "平均每帧点面残差数量：" << planar_pointcloud_constraint_count/pointcloud_count << std::endl;
 //  std::cout << "点面残差约束数量：" << planar_pointcloud_constraint_count <<std::endl;
 //  planar_pointcloud_constraint_count = 0;
 
@@ -3400,9 +3408,9 @@ void imuHandler(const sensor_msgs::ImuConstPtr &imu_msg)
 
     //test bias
     sensor_msgs::ImuPtr new_imu_msg = boost::make_shared<sensor_msgs::Imu>(*imu_msg);
-    new_imu_msg->linear_acceleration.x += 0.1;
-    new_imu_msg->linear_acceleration.y += 0.1;
-    new_imu_msg->linear_acceleration.z += 0.1;
+    new_imu_msg->linear_acceleration.x += 0.0;
+    new_imu_msg->linear_acceleration.y += 0.0;
+    new_imu_msg->linear_acceleration.z += 0.0;
     new_imu_msg->angular_velocity.x += 0.0;
     new_imu_msg->angular_velocity.y += 0.0;
     new_imu_msg->angular_velocity.z += 0.0;
@@ -3605,23 +3613,23 @@ void process_lio()
 //                pose1.close();
 
             	//IMU零偏收敛实验
-                auto currentTime = odomAftLioPivot.header.stamp - T1;
-            	Eigen::Vector3d accelerometer_bias = Bas_[0];
-            	Eigen::Vector3d gyroscope_bias = Bgs_[0];
-            	std::ofstream outfile("/media/ctx/0BE20E8D0BE20E8D/kitti_result/boostLIO/0027_07/imu_bias/imu_bias_a0.1_0.0_0027opt=1.txt", std::ios::app);
-            	if (outfile.is_open()) {
-                	//将偏置写入文件
-                	// outfile << "Accelerometer Bias: " << accelerometer_bias.transpose() << std::endl;
-                	// outfile << "Gyroscope Bias: " << gyroscope_bias.transpose() << std::endl;
-                	outfile << std::fixed << std::setprecision(9) << currentTime << ","
-                    	    << accelerometer_bias.x() << "," << accelerometer_bias.y() << "," << accelerometer_bias.z() << ","
-                        	<< gyroscope_bias.x() << "," << gyroscope_bias.y() << "," << gyroscope_bias.z() << std::endl;
-                	//关闭文件
-                	outfile.close();
-                	// std::cout << "Bias values have been written to imu_bias.txt" << std::endl;
-            	} else {
-                	std::cerr << "Unable to open file for writing" <<std::endl;
-            	}
+             //    auto currentTime = odomAftLioPivot.header.stamp - T1;
+            	// Eigen::Vector3d accelerometer_bias = Bas_[0];
+            	// Eigen::Vector3d gyroscope_bias = Bgs_[0];
+            	// std::ofstream outfile("/media/ctx/0BE20E8D0BE20E8D/kitti_result/boostLIO/0027_07/imu_bias/imu_bias_a0.1_0.0_0027opt=1.txt", std::ios::app);
+            	// if (outfile.is_open()) {
+             //    	//将偏置写入文件
+             //    	// outfile << "Accelerometer Bias: " << accelerometer_bias.transpose() << std::endl;
+             //    	// outfile << "Gyroscope Bias: " << gyroscope_bias.transpose() << std::endl;
+             //    	outfile << std::fixed << std::setprecision(9) << currentTime << ","
+             //        	    << accelerometer_bias.x() << "," << accelerometer_bias.y() << "," << accelerometer_bias.z() << ","
+             //            	<< gyroscope_bias.x() << "," << gyroscope_bias.y() << "," << gyroscope_bias.z() << std::endl;
+             //    	//关闭文件
+             //    	outfile.close();
+             //    	// std::cout << "Bias values have been written to imu_bias.txt" << std::endl;
+            	// } else {
+             //    	std::cerr << "Unable to open file for writing" <<std::endl;
+            	// }
 
             	//发布轨迹
             	geometry_msgs::PoseStamped laserAfterLioPose;
@@ -3665,8 +3673,8 @@ void process_lio()
         laser_count++;
         double averageTime_lio = (sum_lio / laser_count) * 1000.0;
         // 输出平均时间，设置精度为 6 位小数
-    	std::cout << std::fixed << std::setprecision(6);  // 保留6位小数
-        std::cout << "blio整体后端 平均用时" << averageTime_lio << " ms" << std::endl;
+    	// std::cout << std::fixed << std::setprecision(6);  // 保留6位小数
+     //    std::cout << "blio整体后端 平均用时" << averageTime_lio << " ms" << std::endl;
 	}
 } // process_lio
 
@@ -3790,7 +3798,7 @@ int main(int argc, char **argv)
 
     // --------------------------------- 订阅后端数据 ---------------------------------
 //	 ros::Subscriber subCenters = nh.subscribe<sensor_msgs::PointCloud2>("/Center_BA", 100, centerHandler);
-	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/offground_BA", 100, SurfHandler);
+	ros::Subscriber subSurf = nh.subscribe<sensor_msgs::PointCloud2>("/surf_BA", 100, SurfHandler);
     ros::Subscriber subEdge = nh.subscribe<sensor_msgs::PointCloud2>("/Edge_BA", 100, EdgeHandler);
 
     ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/BALM_mapped_to_init", 100, laserOdometryHandler);

@@ -1,18 +1,25 @@
 <launch>
 <!--     <arg name="config_path" default = "$(find faloamBA)/../config/parameters.yaml" /> -->
 
-    <param name="scan_line" type="int" value="64" />
+    <param name="scan_line" type="int" value="128" /> #KITTI 64 OUSTER 128
     <!-- if 1, do mapping 10 Hz, if 2, do mapping 5 Hz. Suggest to use 1, it will adjust frequence automaticlly -->
     <param name="mapping_skip_frame" type="int" value="1" />
     <!-- remove too closed points 0.3 5 -->
 <!--   For KITTI-->
-    <param name="minimum_range" type="double" value="3.0"/>
-    <param name="mapping_line_resolution" type="double" value="0.4"/> A-LOAM
-    <param name="mapping_plane_resolution" type="double" value="0.8"/> A-LOAM
+<!--     <param name="minimum_range" type="double" value="3.0"/> KITTI 3.0 OUSTER 1 -->
+<!--     <param name="mapping_line_resolution" type="double" value="0.4"/> A-LOAM KITTI 0.4 OUSTER -->
+<!--     <param name="mapping_plane_resolution" type="double" value="0.8"/> A-LOAM KITTI 0.8 OUSTER -->
 <!--  For ouster-os0-->
-<!--     <param name="minimum_range" type="double" value="1.0"/> -->
-<!--     <param name="mapping_line_resolution" type="double" value="0.4"/> A-LOAM -->
-<!--     <param name="mapping_plane_resolution" type="double" value="0.8"/> A-LOAM -->
+    <param name="minimum_range" type="double" value="0.4"/>
+
+<!--      距离过近合并LINK3D簇-->
+    <param name="distance_th" type="double" value="0.4"/>
+<!--      LINK3D匹配成功阈值分数-->
+    <param name="match_th" type="int" value="6"/>
+
+<!--  scan to map部分接收点云后 降采样的分辨率-->
+    <param name="mapping_line_resolution" type="double" value="0.1"/> A-LOAM 0.4
+    <param name="mapping_plane_resolution" type="double" value="0.2"/> A-LOAM 0.8
 
     <!-- SC-A-LOAM 两米一个关键帧 2.0 10-->
     <param name="keyframe_meter_gap" type="double" value="2.0"/>
@@ -24,7 +31,7 @@
     <param name="useEdge" type="bool" value="true"/>
     <param name="FilterGroundLeaf" type="double" value="0.1"/>
     <param name="follow" type="bool" value="true"/>
-    <param name="viewMap" type="bool" value="true"/>
+    <param name="viewMap" type="bool" value="false"/>
     <param name="useIsam" type="bool" value="false"/>
 
     <!-- Scan Context -->

@@ -2,7 +2,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "devel/lib/faloamBA/front_end"
+			"path" : "devel/lib/faloamBA/alaserPGO"
 		}
 	],
 	"backtrace" : 1,
@@ -18,6 +18,8 @@
 			"find_external_library",
 			"set_target_properties",
 			"include",
+			"find_dependency",
+			"target_compile_options",
 			"add_definitions",
 			"configure_shared_library_build_settings",
 			"find_qhull",
@@ -28,8 +30,10 @@
 			"LOAMGBA/CMakeLists.txt",
 			"/usr/lib/x86_64-linux-gnu/cmake/pcl/Modules/FindFLANN.cmake",
 			"/usr/lib/x86_64-linux-gnu/cmake/pcl/PCLConfig.cmake",
-			"/usr/local/lib/cmake/Ceres/CeresTargets.cmake",
-			"/usr/local/lib/cmake/Ceres/CeresConfig.cmake",
+			"/usr/local/lib/cmake/GTSAM/GTSAM-exports.cmake",
+			"/usr/local/lib/cmake/GTSAM/GTSAMConfig.cmake",
+			"/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/FindBoost.cmake",
+			"/home/ctx/Downloads/clion-2024.2.2/bin/cmake/linux/x64/share/cmake-3.29/Modules/CMakeFindDependencyMacro.cmake",
 			"/opt/ros/noetic/share/rosconsole/cmake/rosconsole-extras.cmake",
 			"/opt/ros/noetic/share/rosconsole/cmake/rosconsoleConfig.cmake",
 			"/opt/ros/noetic/share/roscpp/cmake/roscppConfig.cmake",
@@ -48,13 +52,13 @@
 			{
 				"command" : 0,
 				"file" : 0,
-				"line" : 49,
+				"line" : 72,
 				"parent" : 0
 			},
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 51,
+				"line" : 84,
 				"parent" : 0
 			},
 			{
@@ -98,7 +102,7 @@
 			{
 				"command" : 3,
 				"file" : 0,
-				"line" : 27,
+				"line" : 30,
 				"parent" : 0
 			},
 			{
@@ -108,7 +112,7 @@
 			{
 				"command" : 7,
 				"file" : 4,
-				"line" : 272,
+				"line" : 35,
 				"parent" : 11
 			},
 			{
@@ -118,8 +122,54 @@
 			{
 				"command" : 6,
 				"file" : 3,
-				"line" : 56,
+				"line" : 99,
 				"parent" : 13
+			},
+			{
+				"command" : 8,
+				"file" : 4,
+				"line" : 22,
+				"parent" : 11
+			},
+			{
+				"command" : 3,
+				"file" : 6,
+				"line" : 76,
+				"parent" : 15
+			},
+			{
+				"file" : 5,
+				"parent" : 16
+			},
+			{
+				"command" : 6,
+				"file" : 5,
+				"line" : 2503,
+				"parent" : 17
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 71,
+				"parent" : 13
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 63,
+				"parent" : 13
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 85,
+				"parent" : 13
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 81,
+				"parent" : 0
 			},
 			{
 				"command" : 3,
@@ -128,85 +178,85 @@
 				"parent" : 0
 			},
 			{
-				"file" : 8,
-				"parent" : 15
+				"file" : 10,
+				"parent" : 23
 			},
 			{
 				"command" : 3,
-				"file" : 8,
+				"file" : 10,
 				"line" : 76,
-				"parent" : 16
-			},
-			{
-				"file" : 7,
-				"parent" : 17
-			},
-			{
-				"command" : 3,
-				"file" : 7,
-				"line" : 197,
-				"parent" : 18
-			},
-			{
-				"file" : 6,
-				"parent" : 19
-			},
-			{
-				"command" : 7,
-				"file" : 6,
-				"line" : 222,
-				"parent" : 20
-			},
-			{
-				"file" : 5,
-				"parent" : 21
-			},
-			{
-				"command" : 8,
-				"file" : 5,
-				"line" : 12,
-				"parent" : 22
-			},
-			{
-				"file" : 11
-			},
-			{
-				"command" : 3,
-				"file" : 11,
-				"line" : 58,
 				"parent" : 24
 			},
 			{
-				"file" : 8,
+				"file" : 9,
 				"parent" : 25
+			},
+			{
+				"command" : 3,
+				"file" : 9,
+				"line" : 197,
+				"parent" : 26
+			},
+			{
+				"file" : 8,
+				"parent" : 27
 			},
 			{
 				"command" : 7,
 				"file" : 8,
-				"line" : 20,
-				"parent" : 26
-			},
-			{
-				"file" : 10,
-				"parent" : 27
-			},
-			{
-				"command" : 9,
-				"file" : 10,
-				"line" : 174,
+				"line" : 222,
 				"parent" : 28
 			},
 			{
-				"command" : 8,
-				"file" : 9,
-				"line" : 18,
+				"file" : 7,
 				"parent" : 29
 			},
 			{
-				"command" : 8,
-				"file" : 5,
+				"command" : 10,
+				"file" : 7,
+				"line" : 12,
+				"parent" : 30
+			},
+			{
+				"file" : 13
+			},
+			{
+				"command" : 3,
+				"file" : 13,
+				"line" : 58,
+				"parent" : 32
+			},
+			{
+				"file" : 10,
+				"parent" : 33
+			},
+			{
+				"command" : 7,
+				"file" : 10,
+				"line" : 20,
+				"parent" : 34
+			},
+			{
+				"file" : 12,
+				"parent" : 35
+			},
+			{
+				"command" : 11,
+				"file" : 12,
+				"line" : 174,
+				"parent" : 36
+			},
+			{
+				"command" : 10,
+				"file" : 11,
+				"line" : 18,
+				"parent" : 37
+			},
+			{
+				"command" : 10,
+				"file" : 7,
 				"line" : 8,
-				"parent" : 22
+				"parent" : 30
 			},
 			{
 				"command" : 5,
@@ -215,26 +265,26 @@
 				"parent" : 4
 			},
 			{
-				"command" : 10,
+				"command" : 12,
 				"file" : 2,
 				"line" : 320,
-				"parent" : 32
+				"parent" : 40
 			},
 			{
 				"command" : 3,
 				"file" : 2,
 				"line" : 165,
-				"parent" : 33
+				"parent" : 41
 			},
 			{
-				"file" : 12,
-				"parent" : 34
+				"file" : 14,
+				"parent" : 42
 			},
 			{
-				"command" : 8,
-				"file" : 12,
+				"command" : 10,
+				"file" : 14,
 				"line" : 88,
-				"parent" : 35
+				"parent" : 43
 			},
 			{
 				"command" : 5,
@@ -246,29 +296,29 @@
 				"command" : 7,
 				"file" : 2,
 				"line" : 351,
-				"parent" : 37
+				"parent" : 45
 			},
 			{
-				"file" : 13,
-				"parent" : 38
+				"file" : 15,
+				"parent" : 46
 			},
 			{
 				"command" : 2,
-				"file" : 13,
+				"file" : 15,
 				"line" : 23,
-				"parent" : 39
+				"parent" : 47
 			},
 			{
-				"command" : 11,
+				"command" : 13,
 				"file" : 0,
 				"line" : 32,
 				"parent" : 0
 			},
 			{
-				"command" : 11,
-				"file" : 13,
+				"command" : 13,
+				"file" : 15,
 				"line" : 26,
-				"parent" : 39
+				"parent" : 47
 			}
 		]
 	},
@@ -279,6 +329,10 @@
 			[
 				{
 					"fragment" : " -Wall -Wextra  -g -std=gnu++17 -fdiagnostics-color=always"
+				},
+				{
+					"backtrace" : 22,
+					"fragment" : "-fopenmp"
 				}
 			],
 			"defines" : 
@@ -300,167 +354,174 @@
 					"define" : "GFLAGS_IS_A_DLL=0"
 				},
 				{
-					"backtrace" : 23,
+					"backtrace" : 31,
 					"define" : "ROSCONSOLE_BACKEND_LOG4CXX"
 				},
 				{
-					"backtrace" : 30,
+					"backtrace" : 38,
 					"define" : "ROS_BUILD_SHARED_LIBS=1"
 				},
 				{
-					"backtrace" : 31,
+					"backtrace" : 39,
 					"define" : "ROS_PACKAGE_NAME=\"faloamBA\""
 				},
 				{
-					"backtrace" : 36,
+					"backtrace" : 44,
 					"define" : "qh_QHpointer"
 				},
 				{
-					"backtrace" : 40,
+					"backtrace" : 48,
 					"define" : "vtkRenderingContext2D_AUTOINIT=1(vtkRenderingContextOpenGL2)"
 				},
 				{
-					"backtrace" : 40,
+					"backtrace" : 48,
 					"define" : "vtkRenderingCore_AUTOINIT=3(vtkInteractionStyle,vtkRenderingFreeType,vtkRenderingOpenGL2)"
 				}
 			],
 			"includes" : 
 			[
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"path" : "/home/ctx/LEIO/LOAMGBA_Public_WS/src/LOAMGBA/include"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"path" : "/opt/ros/noetic/include"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"path" : "/opt/ros/noetic/share/xmlrpcpp/cmake/../../../include/xmlrpcpp"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"path" : "/usr/include/opencv4"
 				},
 				{
-					"backtrace" : 42,
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/build"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/core/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/flann/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/imgproc/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/ml/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/photo/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/dnn/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/features2d/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/gapi/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/imgcodecs/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/videoio/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/calib3d/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/highgui/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/objdetect/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/stitching/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/ts/include"
+				},
+				{
+					"backtrace" : 49,
+					"path" : "/home/ctx/opencv-4.2.0/modules/video/include"
+				},
+				{
+					"backtrace" : 50,
 					"isSystem" : true,
 					"path" : "/usr/include/vtk-7.1"
 				},
 				{
-					"backtrace" : 42,
+					"backtrace" : 50,
 					"isSystem" : true,
 					"path" : "/usr/include/freetype2"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"isSystem" : true,
 					"path" : "/usr/include/eigen3"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"isSystem" : true,
 					"path" : "/usr/include/pcl-1.10"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"isSystem" : true,
 					"path" : "/usr/include/ni"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 49,
 					"isSystem" : true,
 					"path" : "/usr/include/openni2"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 2,
 					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/build"
+					"path" : "/usr/local/include/gtsam/3rdparty/SuiteSparse_config"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 2,
 					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/include"
+					"path" : "/usr/local/include/gtsam/3rdparty/CCOLAMD"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 2,
 					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/core/include"
+					"path" : "/usr/local/include/gtsam/3rdparty/metis"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 2,
 					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/flann/include"
+					"path" : "/usr/local/include/gtsam/3rdparty/cephes"
 				},
 				{
-					"backtrace" : 41,
+					"backtrace" : 2,
 					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/imgproc/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/ml/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/photo/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/dnn/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/features2d/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/gapi/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/imgcodecs/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/videoio/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/calib3d/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/highgui/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/objdetect/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/stitching/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/ts/include"
-				},
-				{
-					"backtrace" : 41,
-					"isSystem" : true,
-					"path" : "/home/ctx/opencv-4.2.0/modules/video/include"
+					"path" : "/usr/local/include/gtsam/3rdparty/Eigen"
 				}
 			],
 			"language" : "CXX",
@@ -474,11 +535,17 @@
 			},
 			"sourceIndexes" : 
 			[
-				0
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6
 			]
 		}
 	],
-	"id" : "front_end::@e2408d9e2600bd031f2b",
+	"id" : "alaserPGO::@e2408d9e2600bd031f2b",
 	"link" : 
 	{
 		"commandFragments" : 
@@ -492,7 +559,7 @@
 				"role" : "flags"
 			},
 			{
-				"fragment" : "-Wl,-rpath,/opt/ros/noetic/lib:/home/ctx/opencv-4.2.0/build/lib:/usr/local/lib",
+				"fragment" : "-Wl,-rpath,/opt/ros/noetic/lib:/usr/local/lib",
 				"role" : "libraries"
 			},
 			{
@@ -1428,52 +1495,17 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "/usr/local/lib/libceres.so.2.1.0",
+				"fragment" : "/usr/local/lib/libceres.a",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_dnn.so.4.2.0",
+				"fragment" : "-fopenmp",
 				"role" : "libraries"
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_gapi.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_highgui.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_ml.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_objdetect.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_photo.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_stitching.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_video.so.4.2.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_videoio.so.4.2.0",
+				"fragment" : "/usr/local/lib/libgtsam.so.4.3a0",
 				"role" : "libraries"
 			},
 			{
@@ -2293,13 +2325,160 @@
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 14,
 				"fragment" : "/usr/local/lib/libglog.so.0.7.0",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 14,
 				"fragment" : "/usr/local/lib/libgflags.a",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lspqr",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-ltbbmalloc",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-ltbb",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcholmod",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lccolamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcolamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-llapack",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lblas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lf77blas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-latlas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lsuitesparseconfig",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lrt",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcxsparse",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lgomp",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-ltbbmalloc",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-ltbb",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcholmod",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lccolamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcolamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lamd",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-llapack",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lblas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lf77blas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-latlas",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lsuitesparseconfig",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lrt",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lcxsparse",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-lgomp",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_serialization.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_system.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_filesystem.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_thread.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 18,
+				"fragment" : "/usr/local/lib/libboost_atomic.so",
 				"role" : "libraries"
 			},
 			{
@@ -2308,40 +2487,55 @@
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_imgcodecs.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_date_time.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_calib3d.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_regex.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_features2d.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_timer.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_flann.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/local/lib/libboost_chrono.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_imgproc.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/lib/x86_64-linux-gnu/libtbb.so.2",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 2,
-				"fragment" : "/home/ctx/opencv-4.2.0/build/lib/libopencv_core.so.4.2.0",
+				"backtrace" : 14,
+				"fragment" : "/usr/lib/x86_64-linux-gnu/libtbbmalloc.so.2",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 19,
+				"fragment" : "/usr/local/lib/libmetis-gtsam.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 20,
+				"fragment" : "-lm",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "/usr/local/lib/libcephes-gtsam.so.1.0.0",
 				"role" : "libraries"
 			}
 		],
 		"language" : "CXX"
 	},
-	"name" : "front_end",
-	"nameOnDisk" : "front_end",
+	"name" : "alaserPGO",
+	"nameOnDisk" : "alaserPGO",
 	"paths" : 
 	{
 		"build" : "LOAMGBA",
@@ -2353,7 +2547,13 @@
 			"name" : "Source Files",
 			"sourceIndexes" : 
 			[
-				0
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6
 			]
 		}
 	],
@@ -2362,7 +2562,43 @@
 		{
 			"backtrace" : 1,
 			"compileGroupIndex" : 0,
-			"path" : "LOAMGBA/src/FrontEnd.cpp",
+			"path" : "LOAMGBA/src/LoopOptimization.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/ImuInitializer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/feature_manager/FeatureManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/factor/MarginalizationFactor.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/factor/PivotPointPlaneFactor.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/factor/PoseLocalParameterization.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "LOAMGBA/src/factor/PriorFactor.cpp",
 			"sourceGroupIndex" : 0
 		}
 	],
